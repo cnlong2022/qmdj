@@ -81,8 +81,8 @@ const STEM_ELEMENT_COLORS: Record<string, string> = {
 const App: React.FC = () => {
   const [eventDate, setEventDate] = useState<string>(getLocalISO(new Date()));
   const [userName, setUserName] = useState<string>('');
-  const [gender, setGender] = useState<'男' | '女'>('女');
-  const [birthDate, setBirthDate] = useState<string>(getLocalISO(new Date(2011, 8, 11, 9, 30)));
+  const [gender, setGender] = useState<'男' | '女'>('男');
+  const [birthDate, setBirthDate] = useState<string>(getLocalISO(new Date(1990, 0, 1, 9, 30)));
   const [question, setQuestion] = useState<string>('');
   const [chart, setChart] = useState<ChartResult | null>(null);
   const [analysis, setAnalysis] = useState<string>('');
@@ -144,7 +144,8 @@ useEffect(() => {
   
   initData();
 }, []);
-
+  const [showBaziAdviceDetails, setShowBaziAdviceDetails] = useState<boolean>(false);
+  const [showAnalysisDetails, setShowAnalysisDetails] = useState<boolean>(true);
   const handleCalculate = useCallback(() => {
     if (!dataReady) return;
     setLoading(true);
@@ -382,30 +383,56 @@ const dynamicPillarDetails = chart?.personalInfo?.analysis.pillars ? [
               </button>
             </div>
           </section>
-          
-          {/* 八字分析建议卡片 - 只在排盘后显示 */}
-          {showChartResult && baziAdvice.length > 0 && (
-            <section className="bg-gradient-to-br from-blue-900/30 to-indigo-900/30 border border-blue-800/50 rounded-2xl p-6 backdrop-blur-sm shadow-xl">
-              <div className="flex items-center gap-2 mb-4 text-blue-400">
-                <Shield className="w-5 h-5" />
-                <h2 className="font-bold">八字命理建议</h2>
-              </div>
-              <div className="space-y-3">
-                {baziAdvice.map((advice, index) => (
-                  <div key={index} className="flex items-start gap-3">
-                    <div className="w-2 h-2 bg-blue-500 rounded-full mt-2 flex-shrink-0"></div>
-                    <p className="text-sm text-blue-200/90 leading-relaxed">{advice}</p>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
         </div>
 
         <div className="lg:col-span-8 space-y-6">
           {/* 条件渲染：只在点击排盘后显示结果 */}
+          
           {showChartResult && chart && chart.personalInfo ? (
             <>
+              <section>
+                <div className="flex items-center gap-2 mb-4">
+                  <span className="w-1.5 h-6 bg-yellow-500 rounded-full shadow-[0_0_8px_rgba(234,179,8,0.5)]"></span>
+                  <h2 className="text-xl font-bold text-white">时家奇门排盘</h2>
+                </div>
+                <QiMenChart chart={chart} />
+              </section>
+
+              <section className="bg-neutral-900/40 border border-neutral-700/50 rounded-2xl p-6 backdrop-blur-sm shadow-xl">
+                <div className="flex justify-center mt-4">
+                  <button onClick={handleAnalyze} disabled={isAnalyzing || !question} className={`px-10 py-3 font-bold rounded-xl flex items-center justify-center gap-2 transition-all ${isAnalyzing || !question ? 'bg-neutral-700 text-neutral-500 cursor-not-allowed' : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-900/20 hover:scale-[1.02] active:scale-95'}`}>
+                    {isAnalyzing ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Sparkles className="w-4 h-4" /> AI 宗师深度解盘</>}
+                  </button>
+                </div>
+              </section>
+
+            {analysis && !isAnalyzing && (
+              <section className="bg-neutral-900/60 border border-neutral-700/50 rounded-2xl p-6 mt-4 shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="flex items-center justify-between mb-4 border-b border-neutral-800 pb-4">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="text-blue-400 w-5 h-5" />
+                    <h3 className="text-lg font-bold text-blue-400 tracking-tight">宗师解析天机</h3>
+                  </div>
+                </div>
+                
+                {showAnalysisDetails && (
+                  <div className="prose prose-invert max-w-none prose-emerald">
+                    <div 
+                      className="text-neutral-300 leading-relaxed font-serif"
+                      dangerouslySetInnerHTML={{ __html: marked.parse(analysis) }}
+                    />
+                  </div>
+                )}
+                  <button 
+                    onClick={() => setShowAnalysisDetails(!showAnalysisDetails)}
+                    className="text-xs text-neutral-500 hover:text-neutral-300 transition-colors flex items-center gap-1"
+                  >
+                    {showAnalysisDetails ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                    {showAnalysisDetails ? '隐藏详情' : '显示详情'}
+                  </button>
+              </section>
+            )}
+
               <section className="bg-gradient-to-br from-neutral-900 to-neutral-800 border border-neutral-700 rounded-2xl p-6 shadow-xl space-y-6">
                 <div className="flex flex-wrap gap-y-6 items-start justify-between">
                   <div className="flex items-center gap-4">
@@ -422,7 +449,7 @@ const dynamicPillarDetails = chart?.personalInfo?.analysis.pillars ? [
                       const pillar = chart.personalInfo!.analysis.pillars[key as keyof typeof chart.personalInfo.analysis.pillars];
                       return (
                         <div key={key} className="flex flex-col items-center gap-1">
-                          <span className="text-[10px] text-neutral-500 font-bold mb-1">{pillar.tenGod}</span>
+                          <span className="text-[10px] text-white-400 font-bold mb-1">{pillar.tenGod}</span>
                           <div className="bg-neutral-950 px-3 py-3 rounded-xl border border-neutral-700 flex flex-col items-center min-w-[56px] shadow-lg">
                             <span className="text-lg font-bold text-yellow-500 leading-tight">{pillar.sb.stem}</span>
                             <span className="text-lg font-bold text-yellow-500 leading-tight">{pillar.sb.branch}</span>
@@ -430,8 +457,8 @@ const dynamicPillarDetails = chart?.personalInfo?.analysis.pillars ? [
                           <div className="flex flex-col items-center mt-1 space-y-0.5">
                             {pillar.hiddenStems.map((hs, idx) => (
                               <div key={idx} className="flex items-center gap-1">
-                                <span className="text-[9px] text-neutral-400">{hs}</span>
-                                <span className="text-[8px] text-neutral-600">({getTenGodLabel(chart.personalInfo!.analysis.dayMaster, hs).slice(0,1)})</span>
+                                <span className="text-[9px] text-white-400">{hs}</span>
+                                <span className="text-[8px] text-white-600">({getTenGodLabel(chart.personalInfo!.analysis.dayMaster, hs).slice(0,1)})</span>
                               </div>
                             ))}
                           </div>
@@ -671,35 +698,63 @@ const dynamicPillarDetails = chart?.personalInfo?.analysis.pillars ? [
                   </div>
                 )}
               </section>
-              
-              <section>
-                <div className="flex items-center gap-2 mb-4">
-                  <span className="w-1.5 h-6 bg-yellow-500 rounded-full shadow-[0_0_8px_rgba(234,179,8,0.5)]"></span>
-                  <h2 className="text-xl font-bold text-white">时家奇门排盘</h2>
-                </div>
-                <QiMenChart chart={chart} />
-              </section>
-
-              <section className="bg-neutral-900/40 border border-neutral-700/50 rounded-2xl p-6 backdrop-blur-sm shadow-xl">
-                <div className="flex justify-center mt-4">
-                  <button onClick={handleAnalyze} disabled={isAnalyzing || !question} className={`px-10 py-3 font-bold rounded-xl flex items-center justify-center gap-2 transition-all ${isAnalyzing || !question ? 'bg-neutral-700 text-neutral-500 cursor-not-allowed' : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-900/20 hover:scale-[1.02] active:scale-95'}`}>
-                    {isAnalyzing ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Sparkles className="w-4 h-4" /> AI 宗师深度解盘</>}
+          
+            {/* 八字分析建议卡片 */}
+            {showChartResult && baziAdvice.length > 0 && (
+              <section className="bg-neutral-900/40 border border-neutral-800 rounded-2xl p-6 backdrop-blur-sm shadow-xl">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2 text-blue-400">
+                    <Shield className="w-5 h-5" />
+                    <h2 className="font-bold">八字命理建议</h2>
+                  </div>
+                  <button 
+                    onClick={() => setShowBaziAdviceDetails(!showBaziAdviceDetails)}
+                    className="text-xs text-neutral-500 hover:text-neutral-300 transition-colors flex items-center gap-1"
+                  >
+                    {showBaziAdviceDetails ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                    {showBaziAdviceDetails ? '隐藏详情' : '显示详情'}
                   </button>
                 </div>
-              </section>
-
-              {analysis && !isAnalyzing && (
-                <section className="bg-neutral-900/60 border border-neutral-700/50 rounded-2xl p-8 mt-4 shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-500 prose prose-invert max-w-none prose-emerald">
-                  <div className="flex items-center gap-2 mb-6 border-b border-neutral-800 pb-4">
-                    <Sparkles className="text-blue-400 w-6 h-6" />
-                    <h3 className="text-xl font-bold text-blue-400 m-0 tracking-tight">宗师解析天机</h3>
+                
+                {showBaziAdviceDetails && (
+                  <div className="space-y-3">
+                    {baziAdvice
+                      .filter(advice => advice && advice.trim() !== '')
+                      .map((advice, index) => {
+                        // 检查是否为标题行（包含【】）
+                        const isTitle = advice.includes('【') && advice.includes('】');
+                        // 检查是否为分隔空行（只有空字符）
+                        const isEmptyLine = advice.trim() === '';
+                        
+                        // 如果是分隔空行，只渲染空div
+                        if (isEmptyLine) {
+                          return <div key={index} className="h-3"></div>;
+                        }
+                        
+                        // 如果是标题行，不需要蓝点
+                        if (isTitle) {
+                          return (
+                            <div key={index} className="mt-4 mb-2">
+                              <p className="text-sm font-bold text-blue-400 leading-relaxed">
+                                {advice}
+                              </p>
+                            </div>
+                          );
+                        }
+                        
+                        // 普通建议行，带蓝点
+                        return (
+                          <div key={index} className="flex items-start gap-3">
+                            <div className="w-2 h-2 bg-blue-500 rounded-full mt-2 flex-shrink-0"></div>
+                            <p className="text-sm text-blue-200/90 leading-relaxed">{advice}</p>
+                          </div>
+                        );
+                      })}
                   </div>
-                  <div 
-                    className="text-neutral-300 leading-relaxed font-serif"
-                    dangerouslySetInnerHTML={{ __html: marked.parse(analysis) }}
-                  />
-                </section>
-              )}
+                )}
+              </section>
+            )}
+
             </>
           ) : (
             // 未排盘时的等待状态
