@@ -4,6 +4,8 @@ import { ChevronUp, ChevronDown } from 'lucide-react';
 
 interface Props {
   chart: ChartResult;
+  gregorianTime?: string; // 新增：公历时间
+  lunarTime?: string;     // 新增：农历时间
 }
 
 // 地支对应的宫位
@@ -20,6 +22,26 @@ const BRANCH_PALACE_MAP: Record<string, number> = {
   '酉': 7, // 兑七宫
   '戌': 6, // 乾六宫
   '亥': 6, // 乾六宫
+};
+
+const getXunShou = (dayStem: string, dayBranch: string): string => {
+  // 根据日柱干支计算旬首
+  const stemIndex = ['甲', '乙', '丙', '丁', '戊', '己', '庚', '辛', '壬', '癸'].indexOf(dayStem);
+  const branchIndex = ['子', '丑', '寅', '卯', '辰', '巳', '午', '未', '申', '酉', '戌', '亥'].indexOf(dayBranch);
+  
+  if (stemIndex === -1 || branchIndex === -1) return '未知';
+  
+  // 计算当前干支距离上一个甲日的距离
+  let distanceToJia = stemIndex;
+  
+  // 计算旬首地支索引
+  let xunShouBranchIdx = (branchIndex - distanceToJia + 12) % 12;
+  
+  // 旬首地支
+  const xunShouBranch = ['子', '丑', '寅', '卯', '辰', '巳', '午', '未', '申', '酉', '戌', '亥'][xunShouBranchIdx];
+  
+  // 旬首天干总是甲
+  return `甲${xunShouBranch}`;
 };
 
 // 宫位对应的主要地支
@@ -55,14 +77,108 @@ const getHorseBranch = (hourBranch: string): string => {
 };
 
 // 计算空亡地支
-const getEmptyBranches = (dayBranch: string): string[] => {
-  const emptyMap: Record<string, string[]> = {
-    '子': ['戌', '亥'], '丑': ['申', '酉'], '寅': ['午', '未'],
-    '卯': ['辰', '巳'], '辰': ['寅', '卯'], '巳': ['子', '丑'],
-    '午': ['戌', '亥'], '未': ['申', '酉'], '申': ['午', '未'],
-    '酉': ['辰', '巳'], '戌': ['寅', '卯'], '亥': ['子', '丑']
+// 计算空亡地支
+const getEmptyBranches = (dayStem: string, dayBranch: string): string[] => {
+  // 首先，我们需要根据日柱干支确定旬首
+  
+  // 天干索引
+  const stemIndex = ['甲', '乙', '丙', '丁', '戊', '己', '庚', '辛', '壬', '癸'].indexOf(dayStem);
+  // 地支索引
+  const branchIndex = ['子', '丑', '寅', '卯', '辰', '巳', '午', '未', '申', '酉', '戌', '亥'].indexOf(dayBranch);
+  
+  if (stemIndex === -1 || branchIndex === -1) {
+    console.warn(`无效的干支: ${dayStem}${dayBranch}`);
+    return [];
+  }
+  
+  // 计算旬首（找到天干为甲的组合）
+  // 公式：从当前干支向前推，直到天干为甲
+  // 当前干支的序号 = stemIndex * 12 + branchIndex（简化计算）
+  
+  // 更直接的方法：使用预定义的旬首映射表
+  const xunShouMap: Record<string, { xunShou: string, empty: string[] }> = {
+    // 甲子旬
+    '甲子': { xunShou: '甲子', empty: ['戌', '亥'] },
+    '乙丑': { xunShou: '甲子', empty: ['戌', '亥'] },
+    '丙寅': { xunShou: '甲子', empty: ['戌', '亥'] },
+    '丁卯': { xunShou: '甲子', empty: ['戌', '亥'] },
+    '戊辰': { xunShou: '甲子', empty: ['戌', '亥'] },
+    '己巳': { xunShou: '甲子', empty: ['戌', '亥'] },
+    '庚午': { xunShou: '甲子', empty: ['戌', '亥'] },
+    '辛未': { xunShou: '甲子', empty: ['戌', '亥'] },
+    '壬申': { xunShou: '甲子', empty: ['戌', '亥'] },
+    '癸酉': { xunShou: '甲子', empty: ['戌', '亥'] },
+    
+    // 甲戌旬
+    '甲戌': { xunShou: '甲戌', empty: ['申', '酉'] },
+    '乙亥': { xunShou: '甲戌', empty: ['申', '酉'] },
+    '丙子': { xunShou: '甲戌', empty: ['申', '酉'] },
+    '丁丑': { xunShou: '甲戌', empty: ['申', '酉'] },
+    '戊寅': { xunShou: '甲戌', empty: ['申', '酉'] },
+    '己卯': { xunShou: '甲戌', empty: ['申', '酉'] },
+    '庚辰': { xunShou: '甲戌', empty: ['申', '酉'] },
+    '辛巳': { xunShou: '甲戌', empty: ['申', '酉'] },
+    '壬午': { xunShou: '甲戌', empty: ['申', '酉'] },
+    '癸未': { xunShou: '甲戌', empty: ['申', '酉'] },
+    
+    // 甲申旬
+    '甲申': { xunShou: '甲申', empty: ['午', '未'] },
+    '乙酉': { xunShou: '甲申', empty: ['午', '未'] },
+    '丙戌': { xunShou: '甲申', empty: ['午', '未'] },
+    '丁亥': { xunShou: '甲申', empty: ['午', '未'] },
+    '戊子': { xunShou: '甲申', empty: ['午', '未'] },
+    '己丑': { xunShou: '甲申', empty: ['午', '未'] },
+    '庚寅': { xunShou: '甲申', empty: ['午', '未'] },
+    '辛卯': { xunShou: '甲申', empty: ['午', '未'] },
+    '壬辰': { xunShou: '甲申', empty: ['午', '未'] },
+    '癸巳': { xunShou: '甲申', empty: ['午', '未'] },
+    
+    // 甲午旬
+    '甲午': { xunShou: '甲午', empty: ['辰', '巳'] },
+    '乙未': { xunShou: '甲午', empty: ['辰', '巳'] },
+    '丙申': { xunShou: '甲午', empty: ['辰', '巳'] },
+    '丁酉': { xunShou: '甲午', empty: ['辰', '巳'] },
+    '戊戌': { xunShou: '甲午', empty: ['辰', '巳'] },
+    '己亥': { xunShou: '甲午', empty: ['辰', '巳'] },
+    '庚子': { xunShou: '甲午', empty: ['辰', '巳'] },
+    '辛丑': { xunShou: '甲午', empty: ['辰', '巳'] },
+    '壬寅': { xunShou: '甲午', empty: ['辰', '巳'] },
+    '癸卯': { xunShou: '甲午', empty: ['辰', '巳'] },
+    
+    // 甲辰旬
+    '甲辰': { xunShou: '甲辰', empty: ['寅', '卯'] },
+    '乙巳': { xunShou: '甲辰', empty: ['寅', '卯'] },
+    '丙午': { xunShou: '甲辰', empty: ['寅', '卯'] },
+    '丁未': { xunShou: '甲辰', empty: ['寅', '卯'] },
+    '戊申': { xunShou: '甲辰', empty: ['寅', '卯'] },
+    '己酉': { xunShou: '甲辰', empty: ['寅', '卯'] },
+    '庚戌': { xunShou: '甲辰', empty: ['寅', '卯'] },
+    '辛亥': { xunShou: '甲辰', empty: ['寅', '卯'] },
+    '壬子': { xunShou: '甲辰', empty: ['寅', '卯'] },
+    '癸丑': { xunShou: '甲辰', empty: ['寅', '卯'] },
+    
+    // 甲寅旬
+    '甲寅': { xunShou: '甲寅', empty: ['子', '丑'] },
+    '乙卯': { xunShou: '甲寅', empty: ['子', '丑'] },
+    '丙辰': { xunShou: '甲寅', empty: ['子', '丑'] },
+    '丁巳': { xunShou: '甲寅', empty: ['子', '丑'] },
+    '戊午': { xunShou: '甲寅', empty: ['子', '丑'] },
+    '己未': { xunShou: '甲寅', empty: ['子', '丑'] },
+    '庚申': { xunShou: '甲寅', empty: ['子', '丑'] },
+    '辛酉': { xunShou: '甲寅', empty: ['子', '丑'] },
+    '壬戌': { xunShou: '甲寅', empty: ['子', '丑'] },
+    '癸亥': { xunShou: '甲寅', empty: ['子', '丑'] }
   };
-  return emptyMap[dayBranch] || [];
+  
+  const key = `${dayStem}${dayBranch}`;
+  const result = xunShouMap[key];
+  
+  if (!result) {
+    console.warn(`未找到干支 ${key} 的空亡信息`);
+    return [];
+  }
+  
+  return result.empty;
 };
 
 // 检查地支是否在宫位中
@@ -70,21 +186,76 @@ const isBranchInPalace = (branch: string, palaceId: number): boolean => {
   return PALACE_BRANCH_MAP[palaceId]?.includes(branch) || false;
 };
 
-const QiMenChart: React.FC<Props> = ({ chart }) => {
+// 获取节气类型对应的颜色
+const getTermTypeColor = (termType: string | undefined): string => {
+  if (!termType) return 'text-neutral-300';
+  return termType === '节' ? 'text-orange-400' : 'text-blue-400';
+};
+
+// 获取元数对应的颜色
+const getYuanColor = (yuan: string | undefined): string => {
+  if (!yuan) return 'text-neutral-300';
+  switch(yuan) {
+    case '上元': return 'text-green-400';
+    case '中元': return 'text-yellow-400';
+    case '下元': return 'text-red-400';
+    default: return 'text-neutral-300';
+  }
+};
+
+// 获取验证状态对应的颜色
+const getVerificationColor = (status: string | undefined): string => {
+  if (!status) return 'text-neutral-300';
+  switch(status) {
+    case '精确': return 'text-green-400';
+    case '近似': return 'text-yellow-400';
+    case '错误': return 'text-red-400';
+    default: return 'text-neutral-300';
+  }
+};
+
+const QiMenChart: React.FC<Props> = ({ chart, gregorianTime, lunarTime }) => {
+  // 防御性检查
+  if (!chart) {
+    return (
+      <div className="p-8 text-center text-yellow-500">
+        图表数据为空，无法渲染
+      </div>
+    );
+  }
+  
+  // 解构时提供完整默认值
+  const {
+    params = {
+      yearSB: { stem: '?', branch: '?' },
+      monthSB: { stem: '?', branch: '?' },
+      daySB: { stem: '?', branch: '?' },
+      hourSB: { stem: '?', branch: '?' },
+      solarTerm: '未知',
+      dunJu: '未知',
+      isYang: true,
+      juNum: 1
+    },
+    palaces = [],
+    zhiFu = '未知',
+    zhiShi = '未知',
+    xunShou = '未知',
+    personalInfo
+  } = chart;
+  
+  // 修复：统一使用解构后的变量
+  const hourBranch = params.hourSB.branch;
+  const dayBranch = params.daySB.branch;
+  
   const visualOrder = [4, 9, 2, 3, 5, 7, 8, 1, 6];
   const [showKeyInfo, setShowKeyInfo] = useState<boolean>(false);
-  
-  // 获取时辰地支
-  const hourBranch = chart.params.hourSB.branch;
-  // 获取日柱地支
-  const dayBranch = chart.params.daySB.branch;
   
   // 计算驿马地支
   const horseBranch = getHorseBranch(hourBranch);
   // 计算空亡地支
-  const emptyBranches = getEmptyBranches(dayBranch);
+  const emptyBranches = getEmptyBranches(params.daySB.stem, params.daySB.branch);
   
-  const getPalace = (id: number) => chart.palaces.find(p => p.id === id);
+  const getPalace = (id: number) => palaces.find(p => p.id === id);
   
   // 获取宫位是否有驿马或空亡
   const getSpecialMark = (palaceId: number): { isHorse: boolean, isEmpty: boolean } => {
@@ -98,6 +269,20 @@ const QiMenChart: React.FC<Props> = ({ chart }) => {
     });
     
     return { isHorse, isEmpty };
+  };
+
+  // 获取节气详细信息
+  const termDetail = {
+    termType: params.termType,
+    yuan: params.yuan,
+    daysSinceTerm: params.daysSinceTerm,
+    hoursSinceTerm: params.hoursSinceTerm,
+    isExact: params.isExact,
+    verification: params.verification,
+    nextTerm: personalInfo?.termInfo?.next,
+    daysToNext: personalInfo?.termInfo?.daysToNext,
+    hoursToNext: personalInfo?.termInfo?.hoursToNext,
+    isTransition: personalInfo?.termInfo?.isTransition
   };
 
   return (
@@ -114,7 +299,7 @@ const QiMenChart: React.FC<Props> = ({ chart }) => {
           </button>
         </div>
         <div className="text-xs text-neutral-500">
-          时家奇门 · {chart.params.dunJu} · {chart.params.isYang ? '阳遁' : '阴遁'}
+          时家奇门 · {params.dunJu} · {params.isYang ? '阳遁' : '阴遁'}
         </div>
       </div>
       
@@ -206,20 +391,119 @@ const QiMenChart: React.FC<Props> = ({ chart }) => {
           <div className="mt-4 grid grid-cols-4 gap-2 text-[10px] sm:text-sm bg-neutral-900/50 p-4 rounded-lg border border-neutral-800">
             <div className="flex flex-col">
               <span className="text-neutral-500">值符</span>
-              <span className="text-yellow-500 text-[14px] font-bold">{chart.zhiFu}</span>
+              <span className="text-yellow-500 text-[14px] font-bold">{zhiFu}</span>
             </div>
             <div className="flex flex-col">
               <span className="text-neutral-500">值使</span>
-              <span className="text-emerald-500 text-[14px] font-bold">{chart.zhiShi}</span>
+              <span className="text-emerald-500 text-[14px] font-bold">{zhiShi}</span>
             </div>
             <div className="flex flex-col">
               <span className="text-neutral-500">旬首</span>
-              <span className="text-orange-500 text-[14px] font-bold">{chart.xunShou}</span>
+              <span className="text-orange-500 text-[14px] font-bold">{xunShou}</span>
             </div>
             <div className="flex flex-col">
               <span className="text-neutral-500">局数</span>
-              <span className="text-white text-[14px] font-bold">{chart.params.dunJu}</span>
+              <span className="text-white text-[14px] font-bold">{params.dunJu}</span>
             </div>
+            
+            {/* 新增：排盘时间信息 */}
+            <div className="col-span-4 mt-2 pt-2 border-t border-neutral-800">
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-neutral-500 text-xs">排盘时间：</span>
+                  <span className="text-blue-400 text-xs font-medium">
+                    {gregorianTime}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-neutral-500 text-xs">农历时间：</span>
+                  <span className="text-purple-400 text-xs font-medium">
+                    {lunarTime}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          {/* 节气详细信息栏 */}
+          <div className="mt-4 bg-gradient-to-r from-blue-900/20 to-blue-950/10 p-4 rounded-lg border border-blue-800/30">
+            <div className="font-bold text-blue-300 mb-2 flex items-center">
+              <span className="w-1.5 h-4 bg-blue-500 rounded-full mr-2"></span>
+              节气详细信息
+            </div>
+            
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+              <div className="flex flex-col">
+                <span className="text-neutral-400 text-xs">节气名称</span>
+                <span className="text-white font-medium">
+                  {params.solarTerm} 
+                  <span className={`ml-1 ${getTermTypeColor(termDetail.termType)}`}>
+                    ({termDetail.termType || '未知'})
+                  </span>
+                </span>
+              </div>
+              
+              <div className="flex flex-col">
+                <span className="text-neutral-400 text-xs">元数</span>
+                <span className={`font-bold ${getYuanColor(termDetail.yuan)}`}>
+                  {termDetail.yuan || '未知'}
+                </span>
+              </div>
+              
+              <div className="flex flex-col">
+                <span className="text-neutral-400 text-xs">距节气时间</span>
+                <span className="text-white font-medium">
+                  {termDetail.daysSinceTerm !== undefined ? `${termDetail.daysSinceTerm}天` : '未知'}
+                  {termDetail.hoursSinceTerm !== undefined && termDetail.hoursSinceTerm > 0 && 
+                    `${termDetail.hoursSinceTerm}时`
+                  }
+                </span>
+              </div>
+              
+              <div className="flex flex-col">
+                <span className="text-neutral-400 text-xs">计算精度</span>
+                <span className={`font-bold ${getVerificationColor(termDetail.verification?.status)}`}>
+                  {termDetail.verification?.status || (termDetail.isExact ? '精确' : '近似')}
+                </span>
+              </div>
+            </div>
+            
+            {/* 显示验证消息 */}
+            {termDetail.verification?.message && (
+              <div className="mt-2 pt-2 border-t border-blue-800/50">
+                <div className="text-xs text-neutral-400">
+                  验证信息：<span className="text-blue-300 ml-1">{termDetail.verification.message}</span>
+                </div>
+              </div>
+            )}
+            
+            {/* 显示下一个节气信息 */}
+            {termDetail.nextTerm && (
+              <div className="mt-3 pt-3 border-t border-blue-800/50">
+                <div className="text-xs text-neutral-400">
+                  下一个节气：
+                  <span className="text-blue-300 ml-1">{termDetail.nextTerm}</span>
+                  {termDetail.daysToNext !== null && (
+                    <span className="ml-2">
+                      （约
+                      <span className="text-yellow-300 mx-1">
+                        {termDetail.daysToNext}天
+                        {termDetail.hoursToNext !== null && termDetail.hoursToNext > 0 && 
+                          `${termDetail.hoursToNext}时`
+                        }
+                      </span>
+                      后）
+                    </span>
+                  )}
+                </div>
+                {termDetail.isTransition && (
+                  <div className="text-xs text-yellow-400 mt-1 flex items-center">
+                    <span className="mr-1">⚠️</span>
+                    节气交接期，能量转换中
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           
           {/* 驿马和空亡说明 */}
@@ -250,10 +534,10 @@ const QiMenChart: React.FC<Props> = ({ chart }) => {
               </div>
               <div>
                 <div className="font-bold text-purple-300 mb-0.5 sm:mb-1">空亡</div>
-                <div className="text-neutral-300 text-[11px] sm:text-sm">
-                  日柱 <span className="text-purple-400 font-bold">{chart.params.daySB.stem}{dayBranch}</span> → 
-                  空亡在 <span className="text-purple-400 font-bold">{emptyBranches.join('、')}</span>
-                </div>
+<div className="text-neutral-300 text-[11px] sm:text-sm">
+  日柱 <span className="text-purple-400 font-bold">{params.daySB.stem}{dayBranch}</span> → 
+  空亡在 <span className="text-purple-400 font-bold">{emptyBranches.join('、')}</span>
+</div>
                 <div className="text-neutral-400 text-[10px] sm:text-xs mt-0.5">
                   空亡主事不实、人不在、谋事落空
                 </div>

@@ -7,6 +7,39 @@ import { StemBranch, ChartResult, PalaceData, PersonalInfo, BaziAnalysis, Pillar
 import { getSolarTermDate, getSolarTermForDate } from './solarTermParser';
 import { toLunar } from './nongliService';
 import { analyzeBaziCore } from './analysisService';
+import { calculateYunNian, formatYunNianDisplay } from './yunNianService';
+import { calculateExactDunJu, getTermDisplayInfo } from './qiMenTermService';
+
+// 寄宫规则配置
+const CENTRAL_PALACE_RULES = {
+  // 中五宫寄宫规则
+  // '寄坤二宫'：标准规则，大多数情况下使用
+  // '寄艮八宫'：部分特殊流派使用
+  centralPalaceAttachedTo: 2, // 2=坤二宫, 8=艮八宫
+  
+  // 九星中天禽星的显示规则
+  tianQinDisplayRule: 'followTianRui' as 'followTianRui' | 'separate' | 'hide',
+  
+  // 值符星寄宫规则
+  zhiFuAttachedPalace: 2, // 值符在中五宫时寄于哪个宫位
+  
+  // 其他特殊规则（预留扩展）
+  specialRules: {
+    // 是否考虑节气交接的特殊处理
+    handleTermTransition: true,
+    // 是否考虑节气和月份的特殊组合
+    handleSpecialCombinations: false,
+  }
+};
+
+// 获取当前寄宫规则
+function getCentralPalaceRule(): number {
+  // 这里可以根据特殊条件动态返回不同的寄宫规则
+  // 例如：根据节气、流派、用户设置等
+  
+  // 暂时返回固定规则
+  return CENTRAL_PALACE_RULES.centralPalaceAttachedTo;
+}
 
 // 旺相休囚死系数
 const WANG_XIANG_XIU_QIU_SI_COEFFICIENTS: Record<string, number> = {
@@ -100,6 +133,23 @@ const TIAO_HOU_SHEN: Record<string, Record<string, string[]>> = {
 
 const XUN_MAP: Record<string, string> = { "甲子": "戊", "甲戌": "己", "甲申": "庚", "甲午": "辛", "甲辰": "壬", "甲寅": "癸" };
 const STAR_ORIGIN: Record<string, number> = { "天蓬": 1, "天芮": 2, "天冲": 3, "天辅": 4, "天禽": 5, "天心": 6, "天柱": 7, "天任": 8, "天英": 9 };
+
+// 旬首计算函数（修复版）
+function calculateXunShou(dayStem: string, dayBranch: string): string {
+  const stemIdx = STEMS.indexOf(dayStem);
+  const branchIdx = BRANCHES.indexOf(dayBranch);
+  
+  if (stemIdx === -1 || branchIdx === -1) return "甲子";
+  
+  // 计算到上一个甲日的距离
+  let distanceToJia = stemIdx;
+  
+  // 计算旬首地支索引
+  let xunShouBranchIdx = (branchIdx - distanceToJia + 12) % 12;
+  
+  const xunShouBranch = BRANCHES[xunShouBranchIdx];
+  return `甲${xunShouBranch}`;
+}
 
 /**
  * 判定十神
@@ -300,7 +350,7 @@ function calculateElementEnergy(
   [pillars.year, pillars.month, pillars.day, pillars.hour].forEach((pillar, index) => {
     const s = pillar.stem;
     const b = pillar.branch;
-    const element = STEM_ELEMENTS[s];
+    const element = STEM_ELEMENTS[s] || '未知';
     const tenGod = getTenGodLabel(dm, s);
     const pillarType = ['year', 'month', 'day', 'hour'][index] as 'year' | 'month' | 'day' | 'hour';
     
@@ -440,14 +490,19 @@ function calculateElementEnergy(
   };
 }
 
-function calculateBaziAnalysis(pillars: { year: StemBranch, month: StemBranch, day: StemBranch, hour: StemBranch }, birthDate: Date): BaziAnalysis {
+function calculateBaziAnalysis(
+  pillars: { year: StemBranch, month: StemBranch, day: StemBranch, hour: StemBranch }, 
+  birthDate: Date,
+  gender: '男' | '女',
+  currentDate: Date  // 新增：当前事件时间
+): BaziAnalysis {
   // 1. 计算五行能量和十神分布，现在包含详细得分信息
   const energyResult = calculateElementEnergy(pillars, birthDate);
   
   const dm = pillars.day.stem;
   const dmEl = STEM_ELEMENTS[dm];
   const rel = ELEMENT_RELATIONS[dmEl];
-  
+
   // 2. 计算身强身弱（基于旺相休囚死调整后的能量）
   const self_support = energyResult.elementCounts[ELEMENT_TO_KEY[dmEl]] + 
                        energyResult.elementCounts[ELEMENT_TO_KEY[rel.wasSheng]];
@@ -548,7 +603,24 @@ function calculateBaziAnalysis(pillars: { year: StemBranch, month: StemBranch, d
     isEmpty: emptyBranches.includes(sb.branch)
   });
 
-  return {
+    // 6. 计算大运流年（新增）
+  // 注意：这里需要确保 yunNianService.ts 已创建并正确导入
+
+  let yunNian;
+  try {
+    yunNian = calculateYunNian(birthDate, currentDate, gender, pillars);
+  } catch (error) {
+    console.warn('大运流年计算失败:', error);
+    yunNian = {
+      daYun: [],
+      liuNian: [],
+      qiYunAge: 1,
+      qiYunDate: '',
+      direction: '顺' as const
+    };
+  }
+
+ return {
     elementCounts: energyResult.elementCounts,
     elementEnergy: energyResult.elementEnergy,
     tenGodDistribution: energyResult.tenGodDistribution,
@@ -567,6 +639,7 @@ function calculateBaziAnalysis(pillars: { year: StemBranch, month: StemBranch, d
     },
     dayMaster: dm, 
     dayMasterElement: dmEl,
+    yunNian,
     elementScoreDetails: energyResult.elementScoreDetails // 添加详细得分信息
   };
 }
@@ -771,103 +844,1221 @@ function validateDateTime(year: number, month: number, day: number, hour: number
   return true;
 }
 
-export function plotChart(date: Date, userName: string, gender: '男' | '女', birthDate: Date): ChartResult {
-  const pillars = getStemBranch(date);
-  const baziPillars = getStemBranch(birthDate);
-  const baziAnalysis = calculateBaziAnalysis(baziPillars, birthDate);
+/**
+ * 计算值使门（修复版）
+ */
+function calculateZhiShi(xunShouSB: string, hourBranch: string, xunShouPalace: number, isYang: boolean): string {
+  console.log(`=== 修复值使门计算 ===`);
   
-  const solarTerm = getSolarTermForDate(date);
-  const termName = solarTerm?.name || "冬至";
-  const dunData = TERM_DUN_MAP[termName] || { type: '阳', ju: [1, 7, 4] };
-  const isYang = dunData.type === '阳';
-  const juNum = dunData.ju[0]; 
-  const dunJuStr = `${dunData.type}遁${['', '一', '二', '三', '四', '五', '六', '七', '八', '九'][juNum]}局`;
+  // 八门顺序（固定）
+  const gateOrder = ["休门", "生门", "伤门", "杜门", "景门", "死门", "惊门", "开门"];
+  
+  // 宫位对应初始门（阳遁）
+  const palaceToGateYang = {
+    1: "休门", 2: "死门", 3: "伤门", 4: "杜门",
+    6: "开门", 7: "惊门", 8: "生门", 9: "景门"
+  };
+  
+  // 宫位对应初始门（阴遁）
+  const palaceToGateYin = {
+    1: "休门", 2: "死门", 3: "伤门", 4: "杜门",
+    6: "开门", 7: "惊门", 8: "生门", 9: "景门"
+  };
+  
+  const palaceToGate = isYang ? palaceToGateYang : palaceToGateYin;
+  
+  // 如果旬首在中五宫，寄坤二宫
+  if (xunShouPalace === 5) {
+    xunShouPalace = 2;
+  }
+  
+  // 获取初始门
+  const startGate = palaceToGate[xunShouPalace] || "休门";
+  console.log(`旬首宫位 ${xunShouPalace} -> 初始门 ${startGate}`);
+  
+  // 获取旬首地支和时支索引
+  const xunShouBranch = xunShouSB.charAt(1);
+  const hourBranchIdx = BRANCHES.indexOf(hourBranch);
+  const xunShouBranchIdx = BRANCHES.indexOf(xunShouBranch);
+  
+  // 计算步数
+  let steps = 0;
+  if (isYang) {
+    // 阳遁：从旬首地支顺数到时支
+    steps = (hourBranchIdx - xunShouBranchIdx + 12) % 12;
+  } else {
+    // 阴遁：从旬首地支逆数到时支
+    steps = (xunShouBranchIdx - hourBranchIdx + 12) % 12;
+  }
+  
+  console.log(`旬首地支 ${xunShouBranch}, 时支 ${hourBranch}, 步数 ${steps}`);
+  
+  // 找到初始门在八门顺序中的位置
+  const startGateIdx = gateOrder.indexOf(startGate);
+  
+  // 计算值使门位置
+  let zhiShiIdx;
+  if (isYang) {
+    zhiShiIdx = (startGateIdx + steps) % 8;
+  } else {
+    zhiShiIdx = (startGateIdx - steps + 8) % 8;
+  }
+  
+  const zhiShi = gateOrder[zhiShiIdx];
+  console.log(`值使门: ${startGate}[${startGateIdx}] ${isYang ? '+' : '-'}${steps} = ${zhiShi}[${zhiShiIdx}]`);
+  
+  return zhiShi;
+}
 
-  const diPan: Record<number, string> = {};
-  STEM_ORDER.forEach((stem, i) => {
-    let palace = isYang ? ((juNum - 1 + i) % 9) + 1 : ((juNum - 1 - i + 9) % 9) + 1;
-    diPan[palace] = stem;
-  });
+/**
+ * 计算值符星（九星）的转动（完整修复版）
+ * 添加 attachedPalace 参数来处理中五宫寄宫规则
+ */
+function rotateStarsFixed(
+  diPan: Record<number, string>,
+  zhiFuStar: string,
+  hourStem: string,
+  isYang: boolean
+): Record<number, string> {
+  console.log(`=== 修复九星转动 ===`);
+  
+  const starOrder = ["天蓬", "天芮", "天冲", "天辅", "天禽", "天心", "天柱", "天任", "天英"];
+  
+  // 找到时干地盘位置
+  let hourStemPalace = 0;
+  for (let i = 1; i <= 9; i++) {
+    if (diPan[i] === hourStem) {
+      hourStemPalace = i;
+      break;
+    }
+  }
+  
+  // 如果时干在中五宫，寄坤二宫
+  if (hourStemPalace === 5) {
+    hourStemPalace = 2;
+  }
+  
+  console.log(`时干 ${hourStem} 在地盘 ${hourStemPalace} 宫`);
+  console.log(`值符星: ${zhiFuStar}`);
+  
+  // 值符星索引
+  const zhiFuIdx = starOrder.indexOf(zhiFuStar);
+  
+  // 九宫飞星顺序（阳遁顺，阴遁逆）
+  const palaceOrder = isYang ? [1, 8, 3, 4, 9, 2, 7, 6] : [6, 7, 2, 9, 4, 3, 8, 1];
+  
+  // 找到时干宫位在飞星顺序中的位置
+  const hourPalaceIdx = palaceOrder.indexOf(hourStemPalace);
+  
+  // 构建星图
+  const starMap: Record<number, string> = {};
+  
+  for (let i = 0; i < palaceOrder.length; i++) {
+    const palace = palaceOrder[i];
+    
+    // 计算星索引：值符星在时干宫位
+    const starIdx = (zhiFuIdx + i - hourPalaceIdx + 8) % 8;
+    starMap[palace] = starOrder[starIdx];
+  }
+  
+  // 中五宫无星
+  starMap[5] = "";
+  
+  // 处理天禽星（随天芮星）
+  for (const palace in starMap) {
+    if (starMap[palace] === "天芮") {
+      starMap[palace] = "芮禽";
+      break;
+    }
+  }
+  
+  console.log('九星分布:');
+  for (let i = 1; i <= 9; i++) {
+    console.log(`  宫位 ${i}: ${starMap[i] || '无'}`);
+  }
+  
+  return starMap;
+}
 
-  const hourStemIdx = STEMS.indexOf(pillars.hour.stem);
-  const hourBranchIdx = BRANCHES.indexOf(pillars.hour.branch);
-  const xunOffset = (hourBranchIdx - hourStemIdx + 12) % 12;
-  const xunShouSB = `甲${BRANCHES[xunOffset]}`;
-  const xunShouStem = XUN_MAP[xunShouSB] || "戊";
+/**
+ * 最终版地盘排布算法 - 正确处理寄宫和天干顺延
+ */
+function setupDiPanFinal(juNum: number, isYang: boolean, attachedPalace: number): Record<number, string> {
+  console.log(`=== 使用查找表排地盘（${isYang ? '阳' : '阴'}遁${juNum}局）===`);
+  
+  // 定义所有遁局的地盘排布（阳遁1-9局，阴遁1-9局）
+  const DUN_JU_DIPAN: Record<string, Record<number, string>> = {
+    // 阳遁
+    '阳1': {1: '戊', 2: '己', 3: '庚', 4: '辛', 5: '', 6: '壬', 7: '癸', 8: '丁', 9: '丙'},
+    '阳2': {1: '己', 2: '庚', 3: '辛', 4: '壬', 5: '', 6: '癸', 7: '丁', 8: '丙', 9: '乙'},
+    '阳3': {1: '庚', 2: '辛', 3: '壬', 4: '癸', 5: '', 6: '丁', 7: '丙', 8: '乙', 9: '戊'},
+    '阳4': {1: '辛', 2: '壬', 3: '癸', 4: '丁', 5: '', 6: '丙', 7: '乙', 8: '戊', 9: '己'},
+    '阳5': {1: '癸', 2: '戊', 3: '丙', 4: '乙', 5: '', 6: '己', 7: '庚', 8: '辛', 9: '壬'},
+    '阳6': {1: '丁', 2: '丙', 3: '乙', 4: '戊', 5: '', 6: '庚', 7: '辛', 8: '壬', 9: '癸'},
+    '阳7': {1: '丙', 2: '乙', 3: '戊', 4: '己', 5: '', 6: '辛', 7: '壬', 8: '癸', 9: '丁'},
+    '阳8': {1: '乙', 2: '戊', 3: '己', 4: '庚', 5: '', 6: '壬', 7: '癸', 8: '丁', 9: '丙'},
+    '阳9': {1: '壬', 2: '癸', 3: '丁', 4: '丙', 5: '', 6: '戊', 7: '己', 8: '庚', 9: '辛'},
+    
+    // 阴遁
+    '阴1': {1: '戊', 2: '乙', 3: '丙', 4: '丁', 5: '', 6: '癸', 7: '壬', 8: '辛', 9: '庚'},
+    '阴2': {1: '己', 2: '戊', 3: '乙', 4: '丙', 5: '', 6: '丁', 7: '癸', 8: '壬', 9: '辛'},
+    '阴3': {1: '庚', 2: '己', 3: '戊', 4: '乙', 5: '', 6: '丙', 7: '丁', 8: '癸', 9: '壬'},
+    '阴4': {1: '辛', 2: '庚', 3: '己', 4: '戊', 5: '', 6: '乙', 7: '丙', 8: '丁', 9: '癸'},
+    '阴5': {1: '壬', 2: '辛', 3: '庚', 4: '己', 5: '', 6: '戊', 7: '乙', 8: '丙', 9: '丁'},
+    '阴6': {1: '癸', 2: '壬', 3: '辛', 4: '庚', 5: '', 6: '己', 7: '戊', 8: '乙', 9: '丙'},
+    '阴7': {1: '丁', 2: '癸', 3: '壬', 4: '辛', 5: '', 6: '庚', 7: '己', 8: '戊', 9: '乙'},
+    '阴8': {1: '丙', 2: '丁', 3: '癸', 4: '壬', 5: '', 6: '辛', 7: '庚', 8: '己', 9: '戊'},
+    '阴9': {1: '乙', 2: '丙', 3: '丁', 4: '癸', 5: '', 6: '壬', 7: '辛', 8: '庚', 9: '己'}
+  };
+  
+  const key = `${isYang ? '阳' : '阴'}${juNum}`;
+  const diPan = DUN_JU_DIPAN[key] || {};
+  
+  console.log(`使用地盘排布表: ${key}`);
+  
+  // 输出验证
+  console.log('地盘分布:');
+  for (let i = 1; i <= 9; i++) {
+    console.log(`  宫位 ${i}: ${diPan[i] || '空'}`);
+  }
+  
+  return diPan;
+}
 
-  let xunShouPalace = 1;
-  for (let p = 1; p <= 9; p++) if (diPan[p] === xunShouStem) { xunShouPalace = p; break; }
-  const zhiFuStar = (NINE_STARS as any)[xunShouPalace];
-
-  let hourStemPalace = 1;
-  const targetStem = (pillars.hour.stem === '甲' ? xunShouStem : pillars.hour.stem);
-  for (let p = 1; p <= 9; p++) if (diPan[p] === targetStem) { hourStemPalace = p; break; }
-  if (hourStemPalace === 5) hourStemPalace = 2;
-
-  const starPalaces = [1, 8, 3, 4, 9, 2, 7, 6];
-  const starNames = ["天蓬", "天任", "天冲", "天辅", "天英", "天芮", "天柱", "天心"];
-  const startIdx = starPalaces.indexOf(xunShouPalace === 5 ? 2 : xunShouPalace);
-  const endIdx = starPalaces.indexOf(hourStemPalace);
-  const shift = (endIdx - startIdx + 8) % 8;
-
+/**
+ * 修复版九星转动算法 - 正确处理时干不在地盘的情况
+ */
+function rotateStarsFinal(
+  diPan: Record<number, string>,
+  zhiFuStar: string,
+  hourStem: string,
+  isYang: boolean,
+  attachedPalace: number = 2
+): Record<number, string> {
+  console.log(`=== 修复转动九星（时干${hourStem}）===`);
+  console.log(`值符星: ${zhiFuStar}, 阳遁: ${isYang}`);
+  
+  const starOrder = ["天蓬", "天芮", "天冲", "天辅", "天禽", "天心", "天柱", "天任", "天英"];
+  const palaceOrder = isYang ? [1, 8, 3, 4, 9, 2, 7, 6] : [6, 7, 2, 9, 4, 3, 8, 1];
+  
+  const zhiFuIndex = starOrder.indexOf(zhiFuStar);
+  if (zhiFuIndex === -1) {
+    console.error(`值符星 ${zhiFuStar} 不在九星列表中: ${starOrder}`);
+    return {};
+  }
+  
+  console.log(`值符星索引: ${zhiFuIndex}`);
+  
+  // 找到时干地盘所在宫位
+  let hourStemPalace = 0;
+  for (let i = 1; i <= 9; i++) {
+    if (diPan[i] === hourStem) {
+      hourStemPalace = i;
+      break;
+    }
+  }
+  
+  // 关键修复：当时干不在地盘时，使用旬首天干的位置
+  if (hourStemPalace === 0) {
+    console.log(`时干 ${hourStem} 不在地盘，使用旬首天干规则`);
+    
+    // 根据奇门规则，当时干不在地盘时，使用旬首天干的位置
+    // 旬首天干庚在地盘兑七宫
+    hourStemPalace = 7; // 庚在兑七宫
+    
+    console.log(`使用旬首天干位置：兑七宫 (${hourStemPalace})`);
+  } else {
+    console.log(`时干 ${hourStem} 在地盘 ${hourStemPalace} 宫`);
+  }
+  
+  // 如果时干在中五宫，寄坤二宫
+  if (hourStemPalace === 5) {
+    hourStemPalace = attachedPalace;
+    console.log(`时干在中五宫，寄于${attachedPalace}宫`);
+  }
+  
+  const hourPalaceIndex = palaceOrder.indexOf(hourStemPalace);
+  console.log(`时干宫位在飞宫顺序中的索引: ${hourPalaceIndex}`);
+  
+  // 构建九星映射
   const starMapping: Record<number, string> = {};
-  const tianPan: Record<number, string> = {};
-  const godMapping: Record<number, string> = {};
-  const gods = isYang ? EIGHT_GODS_YANG : EIGHT_GODS_YIN;
-
-  starPalaces.forEach((p, i) => {
-    const rawStarName = starNames[(i - shift + 8) % 8];
-    const tpStem = diPan[STAR_ORIGIN[rawStarName]];
+  const assignedStars = new Set<string>();
+  
+  // 关键修复：确保所有星都正确分配
+  for (let i = 0; i < palaceOrder.length; i++) {
+    const palace = palaceOrder[i];
     
-    // 天禽寄宫逻辑：随天芮星转动
-    if (rawStarName === "天芮") {
-        starMapping[p] = "芮禽";
-        // 将中五宫的地盘干（寄干）合并到天盘显示
-        tianPan[p] = diPan[5] + tpStem; 
+    // 计算星索引：值符星对准时干宫位
+    let starIndex;
+    if (hourPalaceIndex !== -1) {
+      starIndex = (zhiFuIndex + i - hourPalaceIndex + 9) % 9; // 使用9颗星的循环
     } else {
-        starMapping[p] = rawStarName;
-        tianPan[p] = tpStem;
+      // 如果时干宫位不在飞宫顺序中，从值符星位置开始
+      starIndex = (zhiFuIndex + i) % 9;
     }
     
-    godMapping[p] = gods[(i - endIdx + 8) % 8];
-  });
-
-  const gateNames = ["休门", "生门", "伤门", "杜门", "景门", "死门", "惊门", "开门"];
-  const steps = (hourBranchIdx - xunOffset + 12) % 12;
-  const gateStartIdx = starPalaces.indexOf(xunShouPalace === 5 ? 2 : xunShouPalace);
-  const gateEndIdx = isYang ? (gateStartIdx + steps) % 8 : (gateStartIdx - steps + 8) % 8;
-  const gateMapping: Record<number, string> = {};
-  starPalaces.forEach((p, i) => {
-    gateMapping[p] = gateNames[(i - gateEndIdx + gateStartIdx + 8) % 8];
-  });
-
-  const palaces: PalaceData[] = LOSHU_SQUARE.map(id => ({
-    id, name: (PALACE_NAMES as any)[id],
-    elements: {
-      god: id === 5 ? "" : (godMapping[id] || "--"),
-      star: id === 5 ? "" : (starMapping[id] || "--"),
-      gate: id === 5 ? "" : (gateMapping[id] || "--"),
-      tianPan: id === 5 ? "" : (tianPan[id] || ""),
-      diPan: diPan[id],
-      status: "旺"
+    // 确保索引在有效范围内
+    starIndex = (starIndex + 9) % 9;
+    
+    // 获取星名
+    let star = starOrder[starIndex];
+    starMapping[palace] = star;
+    
+    // 记录已分配的星（天禽星单独处理）
+    if (star !== "天禽") {
+      assignedStars.add(star);
     }
-  }));
+    
+    console.log(`宫位 ${palace}: 星索引 ${starIndex}, 星名 ${star}`);
+  }
+  
+  // 处理天禽星（随天芮星）- 修复逻辑
+  let ruiStarPalace = -1;
+  for (let i = 1; i <= 9; i++) {
+    if (starMapping[i] === "天芮") {
+      ruiStarPalace = i;
+      // 天芮星所在宫位改为芮禽（包含天禽星）
+      starMapping[i] = "芮禽";
+      assignedStars.add("天芮"); // 标记天芮星已分配
+      console.log(`天芮星在宫位 ${i}，改为芮禽（包含天禽星）`);
+      break;
+    }
+  }
+  
+  // 如果天芮星没有出现（特殊情况），但天禽星出现了
+  if (ruiStarPalace === -1) {
+    for (let i = 1; i <= 9; i++) {
+      if (starMapping[i] === "天禽") {
+        starMapping[i] = "芮禽";
+        assignedStars.add("天芮"); // 标记天芮星已分配
+        console.log(`天禽星在宫位 ${i}，改为芮禽（包含天芮星）`);
+        break;
+      }
+    }
+  }
+  
+  // 移除单独的天禽星（如果有）
+  for (let i = 1; i <= 9; i++) {
+    if (starMapping[i] === "天禽") {
+      starMapping[i] = "";
+      console.log(`清除单独的天禽星在宫位 ${i}`);
+    }
+  }
+  
+  // 中五宫无星
+  starMapping[5] = "";
+  
+  // 验证所有星是否都出现
+  const starsPresent = new Set(Object.values(starMapping).filter(s => s && s !== ""));
+  console.log(`出现的九星数量: ${starsPresent.size}`);
+  
+  // 检查是否有缺失的星（天禽星除外）
+  const requiredStars = ["天蓬", "天芮", "天冲", "天辅", "天心", "天柱", "天任", "天英"];
+  const missingStars = requiredStars.filter(star => !assignedStars.has(star));
+  
+  if (missingStars.length > 0) {
+    console.log(`缺失的星: ${missingStars.join(', ')}`);
+    
+    // 找出空的宫位（除了中五宫）
+    const emptyPalaces = [];
+    for (let i = 1; i <= 9; i++) {
+      if (i !== 5 && (!starMapping[i] || starMapping[i] === "")) {
+        emptyPalaces.push(i);
+      }
+    }
+    
+    console.log(`空的宫位: ${emptyPalaces.join(', ')}`);
+    
+    // 将缺失的星分配到空的宫位
+    for (let i = 0; i < Math.min(missingStars.length, emptyPalaces.length); i++) {
+      const star = missingStars[i];
+      const palace = emptyPalaces[i];
+      console.log(`分配缺失的星 ${star} 到宫位 ${palace}`);
+      starMapping[palace] = star;
+      assignedStars.add(star);
+    }
+  }
+  
+  // 如果仍有宫位缺少星，确保至少8个宫位有星（除了中五宫）
+  let missingPalaces = 0;
+  for (let i = 1; i <= 9; i++) {
+    if (i !== 5 && (!starMapping[i] || starMapping[i] === "")) {
+      missingPalaces++;
+    }
+  }
+  
+  if (missingPalaces > 0) {
+    console.warn(`仍有 ${missingPalaces} 个宫位缺少九星`);
+    
+    // 最后一轮检查：确保所有8颗星都出现
+    const allStarsSet = new Set(requiredStars);
+    const remainingMissingStars = Array.from(allStarsSet).filter(star => !assignedStars.has(star));
+    
+    if (remainingMissingStars.length > 0) {
+      console.log(`还有未分配的星: ${remainingMissingStars.join(', ')}`);
+      
+      // 尝试重新分配：找出空的宫位，分配缺失的星
+      for (let i = 1; i <= 9; i++) {
+        if (i === 5) continue;
+        
+        if (!starMapping[i] || starMapping[i] === "") {
+          if (remainingMissingStars.length > 0) {
+            const star = remainingMissingStars.shift()!;
+            console.log(`重新分配 ${star} 到宫位 ${i}`);
+            starMapping[i] = star;
+          }
+        }
+      }
+    }
+  }
+  
+  console.log('=== 九星最终分布 ===');
+  for (let i = 1; i <= 9; i++) {
+    console.log(`宫位 ${i}: ${starMapping[i] || '无星'}`);
+  }
+  
+  // 最终验证：统计出现的星
+  const finalStars = new Set(Object.values(starMapping).filter(s => s && s !== ""));
+  console.log(`最终九星数量: ${finalStars.size}`);
+  
+  if (finalStars.size < 8) {
+    console.warn(`警告：九星数量不足8个，只有${finalStars.size}个`);
+  }
+  
+  return starMapping;
+}
 
+
+/**
+ * 计算值使门（八门）的转动（修复版）
+ */
+function rotateGates(
+  zhiShi: string,
+  hourBranch: string,
+  xunShouPalace: number,
+  isYang: boolean,
+  xunShouSB: string
+): Record<number, string> {
+  console.log(`=== 修复转动八门 ===`);
+  console.log(`值使门: ${zhiShi}, 旬首干支: ${xunShouSB}, 时支: ${hourBranch}, 阳遁: ${isYang}`);
+  
+  // 八门顺序
+  const gateOrder = ["休门", "生门", "伤门", "杜门", "景门", "死门", "惊门", "开门"];
+  
+  // 值使门在顺序中的位置
+  const zhiShiIndex = gateOrder.indexOf(zhiShi);
+  if (zhiShiIndex === -1) {
+    console.error(`值使门 ${zhiShi} 不在八门顺序中`);
+    return {};
+  }
+  
+  console.log(`值使门索引: ${zhiShiIndex}`);
+  
+  // 获取旬首地支
+  const xunShouBranch = xunShouSB.length > 1 ? xunShouSB.charAt(1) : '';
+  
+  // 计算时支从旬首地支开始的步数
+  const hourBranchIdx = BRANCHES.indexOf(hourBranch);
+  const xunShouBranchIdx = BRANCHES.indexOf(xunShouBranch);
+  
+  let steps = 0;
+  if (isYang) {
+    steps = (hourBranchIdx - xunShouBranchIdx + 12) % 12;
+  } else {
+    steps = (xunShouBranchIdx - hourBranchIdx + 12) % 12;
+  }
+  
+  console.log(`旬首地支 ${xunShouBranch}, 时支 ${hourBranch}, 步数 ${steps}`);
+  
+  // 宫位顺序（按飞宫顺序，排除中五宫）
+  const palaceOrder = [1, 8, 3, 4, 9, 2, 7, 6];
+  
+  // 旬首宫位在顺序中的位置
+  let xunShouIndex = palaceOrder.indexOf(xunShouPalace);
+  if (xunShouIndex === -1) {
+    console.warn(`旬首宫位 ${xunShouPalace} 不在宫位顺序中，使用默认0`);
+    xunShouIndex = 0;
+  }
+  
+  console.log(`旬首宫位索引: ${xunShouIndex}`);
+  
+  // 构建八门映射
+  const gateMapping: Record<number, string> = {};
+  
+  for (let i = 0; i < palaceOrder.length; i++) {
+    const palace = palaceOrder[i];
+    
+    let gateIndex;
+    if (isYang) {
+      // 阳遁顺排
+      gateIndex = (zhiShiIndex + steps + i - xunShouIndex + 8) % 8;
+    } else {
+      // 阴遁逆排
+      gateIndex = (zhiShiIndex - steps - i + xunShouIndex + 8) % 8;
+    }
+    
+    gateMapping[palace] = gateOrder[gateIndex];
+    console.log(`宫位 ${palace}: 门索引 ${gateIndex}, 门名 ${gateOrder[gateIndex]}`);
+  }
+  
+  // 中五宫无门
+  gateMapping[5] = "";
+  
+  // 验证所有宫位都有门（除了中五宫）
+  const missingGates = [];
+  for (let i = 1; i <= 9; i++) {
+    if (i !== 5 && !gateMapping[i]) {
+      missingGates.push(i);
+    }
+  }
+  
+  if (missingGates.length > 0) {
+    console.warn(`以下宫位缺少八门: ${missingGates.join(', ')}`);
+  }
+  
+  console.log('=== 八门最终分布 ===');
+  for (let i = 1; i <= 9; i++) {
+    console.log(`宫位 ${i}: ${gateMapping[i] || '无门'}`);
+  }
+  
+  return gateMapping;
+}
+
+/**
+ * 计算值符星（修正版）- 正确处理中五宫寄宫
+ */
+function calculateZhiFuStar(
+  xunShouStem: string,
+  diPan: Record<number, string>
+): string {
+  console.log(`=== 计算值符星（旬首天干: ${xunShouStem}）===`);
+  
+  // 找到旬首天干地盘所在宫位
+  let xunShouPalace = 0;
+  for (let i = 1; i <= 9; i++) {
+    if (diPan[i] === xunShouStem) {
+      xunShouPalace = i;
+      console.log(`旬首天干 ${xunShouStem} 在地盘 ${i} 宫`);
+      break;
+    }
+  }
+  
+  // 如果找不到旬首天干，返回默认值
+  if (xunShouPalace === 0) {
+    console.warn(`旬首天干 ${xunShouStem} 不在地盘中，使用默认值符星天蓬`);
+    return "天蓬";
+  }
+  
+  // 如果在中五宫，使用寄宫规则
+  if (xunShouPalace === 5) {
+    console.log(`旬首天干在中五宫，寄坤二宫`);
+    xunShouPalace = 2; // 寄坤二宫
+  }
+  
+  // 九星与宫位的固定关系
+  const NINE_STARS_MAP_REV: Record<number, string> = {
+    1: "天蓬", 2: "天芮", 3: "天冲", 4: "天辅",
+    5: "天禽", 6: "天心", 7: "天柱", 8: "天任", 9: "天英"
+  };
+  
+  const zhiFuStar = NINE_STARS_MAP_REV[xunShouPalace] || "天蓬";
+  console.log(`值符星: ${zhiFuStar} (宫位 ${xunShouPalace})`);
+  
+  return zhiFuStar;
+}
+
+/**
+ * 计算八神的转动（完整修复版）
+ */
+function rotateGods(
+  zhiFuPalace: number,
+  isYang: boolean
+): Record<number, string> {
+  console.log(`=== 转动八神 ===`);
+  console.log(`值符宫位: ${zhiFuPalace}, 阳遁: ${isYang}`);
+  
+  // 八神顺序（阳遁顺行，阴遁逆行）
+  const yangGods = ["值符", "螣蛇", "太阴", "六合", "白虎", "玄武", "九地", "九天"];
+  const yinGods = ["值符", "九天", "九地", "玄武", "白虎", "六合", "太阴", "螣蛇"];
+  
+  const gods = isYang ? yangGods : yinGods;
+  
+  // 宫位顺序（按飞宫顺序，中五宫不参与）
+  const palaceOrder = [1, 8, 3, 4, 9, 2, 7, 6];
+  
+  // 找到值符宫在顺序中的位置
+  let zhiFuIndex = palaceOrder.indexOf(zhiFuPalace);
+  
+  // 如果值符在中五宫，寄坤二宫
+  if (zhiFuPalace === 5) {
+    zhiFuIndex = palaceOrder.indexOf(CENTRAL_PALACE_RULES.zhiFuAttachedPalace);
+    console.log(`值符在中五宫，寄${CENTRAL_PALACE_RULES.zhiFuAttachedPalace}宫，位置索引: ${zhiFuIndex}`);
+  }
+  
+  if (zhiFuIndex === -1) {
+    console.error(`值符宫位 ${zhiFuPalace} 不在宫位顺序中: ${palaceOrder}`);
+    return {};
+  }
+  
+  console.log(`值符宫位索引: ${zhiFuIndex}`);
+  
+  // 构建八神映射
+  const godMapping: Record<number, string> = {};
+  
+  palaceOrder.forEach((palace, index) => {
+    let godIndex;
+    if (isYang) {
+      // 阳遁顺行：从值符开始顺排
+      godIndex = (index - zhiFuIndex + 8) % 8;
+    } else {
+      // 阴遁逆行：从值符开始逆排
+      godIndex = (zhiFuIndex - index + 8) % 8;
+    }
+    
+    godMapping[palace] = gods[godIndex];
+    console.log(`宫位 ${palace}: 神索引 ${godIndex}, 神名 ${gods[godIndex]}`);
+  });
+  
+  // 中五宫无神
+  godMapping[5] = "";
+  
+  // 输出八神分布
+  console.log('=== 八神最终分布 ===');
+  for (let i = 1; i <= 9; i++) {
+    console.log(`宫位 ${i}: ${godMapping[i] || '无神'}`);
+  }
+  
+  return godMapping;
+}
+
+/**
+ * 修复版天盘转动算法 - 正确处理天禽星
+ */
+function rotateTianPanFixed(
+  diPan: Record<number, string>,
+  starMapping: Record<number, string>,
+  hourStem: string,
+  attachedPalace: number = 2
+): Record<number, string> {
+  console.log(`=== 修复转动天盘 ===`);
+  
+  const tianPan: Record<number, string> = {};
+  
+  // 初始化所有宫位为空
+  for (let i = 1; i <= 9; i++) {
+    tianPan[i] = "";
+  }
+  
+  // 九星与原始宫位对应关系
+  const starToPalace: Record<string, number> = {
+    "天蓬": 1, "天芮": 2, "天冲": 3, "天辅": 4,
+    "天禽": 5, "天心": 6, "天柱": 7, "天任": 8, "天英": 9,
+    "芮禽": 2  // 芮禽视为天芮星在坤二宫
+  };
+  
+  // 为每个有星的宫位排天盘干
+  for (let palace = 1; palace <= 9; palace++) {
+    const star = starMapping[palace];
+    
+    if (!star || star === "") {
+      continue;
+    }
+    
+    let originalPalace = starToPalace[star];
+    
+    // 特殊处理：芮禽视为天芮星在坤二宫
+    if (star === "芮禽") {
+      originalPalace = 2;
+    }
+    
+    if (!originalPalace) {
+      console.warn(`找不到九星 ${star} 的原始宫位`);
+      continue;
+    }
+    
+    // 获取原始宫位的地盘天干
+    let diPanGan = "";
+    
+    if (originalPalace === 5) {
+      // 中五宫的天干在寄宫位置
+      diPanGan = diPan[attachedPalace] || "";
+      console.log(`宫位 ${palace}（${star}）: 原始宫位 ${originalPalace} 寄于 ${attachedPalace}宫，地盘干 "${diPanGan}"`);
+    } else {
+      diPanGan = diPan[originalPalace] || "";
+      console.log(`宫位 ${palace}（${star}）: 原始宫位 ${originalPalace}，地盘干 "${diPanGan}"`);
+    }
+    
+    tianPan[palace] = diPanGan;
+  }
+  
+  // 特殊处理：如果天英星出现，确保其天盘干正确
+  for (let palace = 1; palace <= 9; palace++) {
+    if (starMapping[palace] === "天英" && (!tianPan[palace] || tianPan[palace] === "")) {
+      // 天英星原始宫位是离九宫（9宫）
+      tianPan[palace] = diPan[9] || "";
+      console.log(`补充天英星在宫位 ${palace} 的天盘干为 ${tianPan[palace]}`);
+    }
+  }
+  
+  console.log('=== 天盘最终分布 ===');
+  for (let i = 1; i <= 9; i++) {
+    console.log(`宫位 ${i}: ${tianPan[i] || '空'}`);
+  }
+  
+  return tianPan;
+}
+
+export function plotChart(eventDate: Date, userName: string, gender: '男' | '女', birthDate: Date): ChartResult {
+  console.log('=== 开始排盘计算 ===');
+  console.log(`事件时间: ${eventDate.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`);
+  console.log(`用户: ${userName}, 性别: ${gender}`);
+  console.log(`出生时间: ${birthDate.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`);
+  
+  // 1. 获取事件时间的四柱
+  const pillars = getStemBranch(eventDate);
+  console.log(`四柱: ${pillars.year.stem}${pillars.year.branch} ${pillars.month.stem}${pillars.month.branch} ${pillars.day.stem}${pillars.day.branch} ${pillars.hour.stem}${pillars.hour.branch}`);
+  
+  // 2. 获取出生时间的四柱
+  const baziPillars = getStemBranch(birthDate);
+  console.log(`八字四柱: ${baziPillars.year.stem}${baziPillars.year.branch} ${baziPillars.month.stem}${baziPillars.month.branch} ${baziPillars.day.stem}${baziPillars.day.branch} ${baziPillars.hour.stem}${baziPillars.hour.branch}`);
+  
+  // 3. 计算八字分析（传入 eventDate 作为当前时间）
+  const baziAnalysis = calculateBaziAnalysis(baziPillars, birthDate, gender, eventDate); 
+  console.log(`八字分析完成，日主: ${baziAnalysis.dayMaster}，五行: ${baziAnalysis.dayMasterElement}，旺衰: ${baziAnalysis.strength}`);
+  
+  // 4. 获取节气信息
+   const solarTerm = calculateExactDunJu(eventDate);
+   const dunJuResult = calculateExactDunJu(eventDate);
+   const termName = dunJuResult.termName;
+  console.log(`当前节气: ${termName}`);
+  
+  // 5. 使用精确节气数据计算遁局
+  console.log(`开始计算遁局...`);
+ 
+  
+  // 使用 getCentralPalaceRule() 获取寄宫规则
+  const centralAttachedPalace = getCentralPalaceRule();
+  console.log(`寄宫规则确定: 中五宫寄${centralAttachedPalace}宫`);
+  
+  const isYang = dunJuResult.type === '阳';
+  const juNum = dunJuResult.ju;
+  
+  // 中文数字映射
+  const chineseNumbers = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
+  const dunJuStr = `${dunJuResult.type}遁${chineseNumbers[juNum]}局`;
+  
+  console.log(`遁局计算结果:`);
+  console.log(`  节气: ${dunJuResult.termName}`);
+  console.log(`  类型: ${dunJuResult.type}`);
+  console.log(`  局数: ${juNum}`);
+  console.log(`  元数: ${dunJuResult.yuan}`);
+  console.log(`  距节气: ${dunJuResult.daysSinceTerm.toFixed(2)}天 (${Math.floor(dunJuResult.daysSinceTerm)}天${dunJuResult.hoursSinceTerm}小时${dunJuResult.minutesSinceTerm}分)`);
+  console.log(`  精度: ${dunJuResult.verification.status}`);
+  console.log(`  消息: ${dunJuResult.verification.message}`);
+  
+  // 6. 地盘排布（优化版算法）- 避免循环卡死
+  const diPan = setupDiPanFinal(juNum, isYang, centralAttachedPalace);
+  
+// 验证地盘排布
+console.log('=== 地盘排布验证 ===');
+const yangDunJuMap: Record<number, Record<number, string>> = {
+  1: {1: '戊', 2: '己', 3: '庚', 4: '辛', 6: '壬', 7: '癸', 8: '丁', 9: '丙'},
+  2: {1: '己', 2: '庚', 3: '辛', 4: '壬', 6: '癸', 7: '丁', 8: '丙', 9: '乙'},
+  3: {1: '庚', 2: '辛', 3: '壬', 4: '癸', 6: '丁', 7: '丙', 8: '乙', 9: '戊'},
+  4: {1: '辛', 2: '壬', 3: '癸', 4: '丁', 6: '丙', 7: '乙', 8: '戊', 9: '己'},
+  5: {1: '癸', 2: '戊', 3: '丙', 4: '乙', 6: '己', 7: '庚', 8: '辛', 9: '壬'},
+  6: {1: '丁', 2: '丙', 3: '乙', 4: '戊', 6: '庚', 7: '辛', 8: '壬', 9: '癸'},
+  7: {1: '丙', 2: '乙', 3: '戊', 4: '己', 6: '辛', 7: '壬', 8: '癸', 9: '丁'},
+  8: {1: '乙', 2: '戊', 3: '己', 4: '庚', 6: '壬', 7: '癸', 8: '丁', 9: '丙'},
+  9: {1: '壬', 2: '癸', 3: '丁', 4: '丙', 6: '戊', 7: '己', 8: '庚', 9: '辛'}
+};
+
+if (isYang && yangDunJuMap[juNum]) {
+  const expected = yangDunJuMap[juNum];
+  let errors = 0;
+  for (let i = 1; i <= 9; i++) {
+    if (i === 5) continue; // 跳过中五宫
+    const actual = diPan[i];
+    const expect = expected[i as keyof typeof expected];
+    if (actual !== expect) {
+      errors++;
+      console.warn(`宫位${i}: 预期${expect}, 实际${actual}`);
+    }
+  }
+  if (errors > 0) {
+    console.warn(`发现${errors}个地盘排布错误`);
+  } else {
+    console.log('地盘排布验证通过');
+  }
+}
+  console.log('地盘完整分布:');
+  for (let i = 1; i <= 9; i++) {
+    console.log(`  宫位 ${i}: ${diPan[i] || '空'}`);
+  }
+  
+  // 7. 计算旬首（修复版）
+  const xunShouSB = calculateXunShou(pillars.day.stem, pillars.day.branch);
+  const xunShouStem = XUN_MAP[xunShouSB] || "戊";
+  
+  console.log(`旬首计算:`);
+  console.log(`  旬首干支: ${xunShouSB}`);
+  console.log(`  旬首天干: ${xunShouStem}`);
+  
+  // 8. 确定值符星
+  const zhiFuStar = calculateZhiFuStar(xunShouStem, diPan);
+  
+  // 找到值符星所在的原始宫位
+  const NINE_STARS_MAP: Record<string, number> = {
+    "天蓬": 1, "天芮": 2, "天冲": 3, "天辅": 4,
+    "天禽": 5, "天心": 6, "天柱": 7, "天任": 8, "天英": 9
+  };
+  
+  const zhiFuPalace = NINE_STARS_MAP[zhiFuStar] || 1;
+  console.log(`值符星计算:`);
+  console.log(`  值符星: ${zhiFuStar}`);
+  console.log(`  值符原始宫位: ${zhiFuPalace}`);
+  
+  // 9. 确定值使门（修复版）
+  const zhiShi = calculateZhiShi(xunShouSB, pillars.hour.branch, zhiFuPalace, isYang);
+  console.log(`值使门计算:`);
+  console.log(`  值使门: ${zhiShi}`);
+  console.log(`  旬首: ${xunShouSB}, 时支: ${pillars.hour.branch}, 值符宫位: ${zhiFuPalace}, 阳遁: ${isYang}`);
+  
+  // 10. 排九星、八门、八神、天盘
+  console.log(`开始排布九星、八门、八神、天盘...`);
+  
+  // 使用修复后的转动函数（需要确保这些函数已修复）
+  const starMapping = rotateStarsFinal(diPan, zhiFuStar, pillars.hour.stem, isYang, centralAttachedPalace);
+  const gateMapping = rotateGates(zhiShi, pillars.hour.branch, zhiFuPalace, isYang, xunShouSB);
+  const godMapping = rotateGods(zhiFuPalace, isYang);
+  const tianPan = rotateTianPanFixed(diPan, starMapping, pillars.hour.stem, centralAttachedPalace);
+  
+  // 验证关键分布
+  console.log('=== 排盘关键分布验证 ===');
+  
+  // 验证九星分布
+  console.log('九星分布:');
+  for (let i = 1; i <= 9; i++) {
+    const actualStar = starMapping[i] || "无星";
+    console.log(`  宫位 ${i}: ${actualStar}`);
+  }
+  console.log(`九星分布验证完成`);
+  
+  // 验证八门分布
+  console.log('八门分布:');
+  for (let i = 1; i <= 9; i++) {
+    const gate = gateMapping[i] || "无门";
+    console.log(`  宫位 ${i}: ${gate}`);
+  }
+  
+  // 验证八神分布
+  console.log('八神分布:');
+  for (let i = 1; i <= 9; i++) {
+    const god = godMapping[i] || "无神";
+    console.log(`  宫位 ${i}: ${god}`);
+  }
+  
+  // 验证天盘分布
+  console.log('天盘分布:');
+  for (let i = 1; i <= 9; i++) {
+    const tianGan = tianPan[i] || "空";
+    console.log(`  宫位 ${i}: ${tianGan}`);
+  }
+  
+  // 验证地盘分布
+  console.log('地盘分布:');
+  for (let i = 1; i <= 9; i++) {
+    const diGan = diPan[i] || "空";
+    console.log(`  宫位 ${i}: ${diGan}`);
+  }
+  
+  // 11. 构建九宫数据
+  const palaces: PalaceData[] = LOSHU_SQUARE.map(id => {
+    // 处理天禽星显示
+    let starDisplay = starMapping[id] || "";
+    
+    return {
+      id,
+      name: (PALACE_NAMES as any)[id],
+      elements: {
+        god: godMapping[id] || "",
+        star: starDisplay,
+        gate: gateMapping[id] || "",
+        tianPan: tianPan[id] || "",
+        diPan: diPan[id] || "",
+        status: "旺"
+      }
+    };
+  });
+  
+  // 12. 格式化日期显示
   const solarDateStr = `${birthDate.getFullYear()}年${String(birthDate.getMonth()+1).padStart(2,'0')}月${String(birthDate.getDate()).padStart(2,'0')}日${String(birthDate.getHours()).padStart(2,'0')}点${String(birthDate.getMinutes()).padStart(2,'0')}分`;
+  
+  // 13. 获取农历信息
   const lunarYearStr = `${baziPillars.year.stem}${baziPillars.year.branch}年（${ZODIAC[baziPillars.year.branch]}）`;
   const lunarDateStr = toLunar(birthDate);
-
+  
+  // 14. 获取节气显示信息
+  const termInfo = getTermDisplayInfo(eventDate);
+  
+  // 15. 计算空亡地支
+  const emptyBranches: string[] = EMPTY_BRANCHES[`${pillars.day.stem}${pillars.day.branch}`] || [];
+  console.log(`空亡地支: ${emptyBranches.join(', ')}`);
+  
+  // 16. 计算驿马
+  const maBranches: string[] = [];
+  const hourBranch = pillars.hour.branch;
+  // 驿马计算规则：申子辰马在寅，巳酉丑马在亥，寅午戌马在申，亥卯未马在巳
+  const maRules: Record<string, string[]> = {
+    '申': ['寅'], '子': ['寅'], '辰': ['寅'],
+    '巳': ['亥'], '酉': ['亥'], '丑': ['亥'],
+    '寅': ['申'], '午': ['申'], '戌': ['申'],
+    '亥': ['巳'], '卯': ['巳'], '未': ['巳']
+  };
+  
+  if (maRules[hourBranch]) {
+    maBranches.push(...maRules[hourBranch]);
+  }
+  console.log(`驿马地支: ${maBranches.join(', ')}`);
+  
+  // 17. 宫位地支对应关系
+  const palaceBranches: Record<number, string[]> = {
+    1: ['子'],  // 坎一宫
+    2: ['未', '申'],  // 坤二宫
+    3: ['卯'],  // 震三宫
+    4: ['辰', '巳'],  // 巽四宫
+    5: [],  // 中五宫
+    6: ['戌', '亥'],  // 乾六宫
+    7: ['酉'],  // 兑七宫
+    8: ['丑', '寅'],  // 艮八宫
+    9: ['午']   // 离九宫
+  };
+  
+const palaceList: PalaceData[] = LOSHU_SQUARE.map(id => {
+  // 处理天禽星显示
+  let starDisplay = starMapping[id] || "";
+  
   return {
-    params: { yearSB: pillars.year, monthSB: pillars.month, daySB: pillars.day, hourSB: pillars.hour, solarTerm: termName, dunJu: dunJuStr, isYang, juNum },
-    palaces, zhiFu: zhiFuStar, zhiShi: gateMapping[starPalaces[gateEndIdx]], xunShou: xunShouSB,
-    personalInfo: {
-      name: userName, gender,
+    id,
+    name: (PALACE_NAMES as any)[id],
+    elements: {
+      god: godMapping[id] || "",
+      star: starDisplay,
+      gate: gateMapping[id] || "",
+      tianPan: tianPan[id] || "",
+      diPan: diPan[id] || "",
+      status: "旺"
+    }
+  };
+});
+
+// === 添加验证代码在这里 ===
+console.log('=== 最终排盘验证 ===');
+console.log('=== 九星分布验证 ===');
+const starCounts: Record<string, number> = {};
+const starPalaces: Record<string, number[]> = {};
+
+for (let i = 1; i <= 9; i++) {
+  const star = starMapping[i];
+  if (star && star !== "") {
+    starCounts[star] = (starCounts[star] || 0) + 1;
+    starPalaces[star] = starPalaces[star] || [];
+    starPalaces[star].push(i);
+  }
+}
+
+// 检查重复的星
+for (const [star, count] of Object.entries(starCounts)) {
+  if (count > 1 && star !== "芮禽") {
+    console.warn(`警告：${star} 出现在 ${count} 个宫位（${starPalaces[star].join(', ')}）`);
+  }
+}
+
+// 检查是否所有九星都出现（天禽星除外，因为它与天芮合并）
+const expectedStars = ["天蓬", "天芮", "天冲", "天辅", "天心", "天柱", "天任", "天英"];
+for (const star of expectedStars) {
+  if (!starCounts[star] && !(star === "天芮" && starCounts["芮禽"])) {
+    console.warn(`警告：缺少星 ${star}`);
+  }
+}
+// 1. 验证九星完整
+const starsInPalaces = new Set();
+palaceList.forEach(p => {
+  if (p.elements.star && p.elements.star !== "") {
+    starsInPalaces.add(p.elements.star);
+  }
+});
+console.log(`九星出现数量: ${starsInPalaces.size}`);
+if (starsInPalaces.size < 8) {
+  console.warn(`九星不完整，缺少 ${8 - starsInPalaces.size} 个星`);
+  
+  // 检查哪个星缺失
+  const allStars = ["天蓬", "天芮", "天冲", "天辅", "天禽", "天心", "天柱", "天任", "天英"];
+  for (const star of allStars) {
+    if (!starsInPalaces.has(star) && star !== "天禽") { // 天禽星可能合并为芮禽
+      console.log(`缺失的星: ${star}`);
+    }
+  }
+}
+
+// 2. 验证天盘完整
+const tianPanCount = palaceList.filter(p => p.elements.tianPan && p.elements.tianPan !== "").length;
+console.log(`天盘干出现数量: ${tianPanCount}`);
+
+// 3. 验证八门完整
+const gateCount = palaceList.filter(p => p.elements.gate && p.elements.gate !== "").length;
+console.log(`八门出现数量: ${gateCount}`);
+
+// 4. 验证八神完整
+const godCount = palaceList.filter(p => p.elements.god && p.elements.god !== "").length;
+console.log(`八神出现数量: ${godCount}`);
+
+// 验证各个宫位的元素是否完整
+let incompletePalaces = 0;
+for (const palace of palaceList) {
+  const missing = [];
+  if (!palace.elements.god) missing.push("八神");
+  if (!palace.elements.star) missing.push("九星");
+  if (!palace.elements.gate) missing.push("八门");
+  if (!palace.elements.tianPan) missing.push("天盘干");
+  
+  if (missing.length > 0 && palace.id !== 5) { // 中五宫可以缺少元素
+    incompletePalaces++;
+    console.warn(`宫位 ${palace.id} (${palace.name}) 缺少: ${missing.join(', ')}`);
+  }
+}
+
+if (incompletePalaces > 0) {
+  console.warn(`共有 ${incompletePalaces} 个宫位元素不完整`);
+} else {
+  console.log('✅ 所有宫位元素完整');
+}
+// === 验证代码结束 ===
+
+// 12. 构建最终结果
+const result: ChartResult = {
+    params: {
+      yearSB: pillars.year,
+      monthSB: pillars.month,
+      daySB: pillars.day,
+      hourSB: pillars.hour,
+      solarTerm: dunJuResult.termName,
+      dunJu: dunJuStr,
+      isYang,
+      juNum: juNum,
+      yuan: dunJuResult.yuan,
+      termType: dunJuResult.termType,
+      daysSinceTerm: dunJuResult.daysSinceTerm,
+      hoursSinceTerm: dunJuResult.hoursSinceTerm,
+      isExact: dunJuResult.isExact,
+      verification: dunJuResult.verification,
+      type: dunJuResult.type,
+    },
+  palaces,
+  zhiFu: zhiFuStar,
+  zhiShi,
+  xunShou: xunShouSB,
+  personalInfo: {
+      name: userName,
+      gender,
       solarDate: solarDateStr,
       lunarDate: `${lunarYearStr}${lunarDateStr}`,
       bazi: `${baziPillars.year.stem}${baziPillars.year.branch} ${baziPillars.month.stem}${baziPillars.month.branch} ${baziPillars.day.stem}${baziPillars.day.branch} ${baziPillars.hour.stem}${baziPillars.hour.branch}`,
-      analysis: baziAnalysis
+      analysis: baziAnalysis,
+      termInfo: {
+        current: termInfo.currentTerm,
+        currentDate: termInfo.currentTermDate.toLocaleString('zh-CN', { 
+          timeZone: 'Asia/Shanghai',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        }),
+        next: termInfo.nextTerm || '',
+        nextDate: termInfo.nextTermDate ? termInfo.nextTermDate.toLocaleString('zh-CN', {
+          timeZone: 'Asia/Shanghai',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        }) : null,
+        daysToNext: termInfo.daysToNext,
+        hoursToNext: termInfo.hoursToNext || null,
+        minutesToNext: termInfo.minutesToNext || null,
+        isTransition: termInfo.isTransition
+      },
+      emptyBranches,
+      maBranches,
+      palaceBranches
+    },
+    debugInfo: {
+      starMapping,
+      gateMapping,
+      godMapping,
+      tianPan,
+      diPan,
+      dunJuResult,
+      pillars,
+      baziPillars
     }
   };
+return result;
+}
+
+/**
+ * 验证排盘结果的辅助函数
+ */
+export function verifyChartResult(chart: ChartResult): {
+  isValid: boolean;
+  issues: string[];
+  warnings: string[];
+  details: Record<string, any>;
+} {
+  const issues: string[] = [];
+  const warnings: string[] = [];
+  const details: Record<string, any> = {};
+  
+  // 基本验证
+  if (!chart) {
+    issues.push("排盘结果为空");
+    return { isValid: false, issues, warnings, details };
+  }
+  
+  if (!chart.params || !chart.palaces) {
+    issues.push("排盘数据结构不完整");
+    return { isValid: false, issues, warnings, details };
+  }
+  
+  // 遁局验证
+  const { type, juNum, yuan } = chart.params;
+  if (type !== '阳' && type !== '阴') {
+    issues.push(`遁局类型无效: ${type}`);
+  }
+  
+  if (juNum < 1 || juNum > 9) {
+    issues.push(`局数超出范围: ${juNum} (应在1-9之间)`);
+  }
+  
+  if (!['上元', '中元', '下元'].includes(yuan)) {
+    warnings.push(`元数格式异常: ${yuan}`);
+  }
+  
+  // 九宫验证
+  if (chart.palaces.length !== 9) {
+    issues.push(`九宫数据数量不正确: ${chart.palaces.length}`);
+  }
+  
+  // 值符值使验证
+  if (!chart.zhiFu || !chart.zhiShi || !chart.xunShou) {
+    warnings.push("值符、值使或旬首信息缺失");
+  }
+  
+  // 检查是否有重复的九星
+  const stars = chart.palaces.map(p => p.elements.star).filter(Boolean);
+  const uniqueStars = new Set(stars);
+  if (uniqueStars.size !== stars.length) {
+    warnings.push("九星分布可能有重复");
+  }
+  
+  // 检查天禽星显示
+  const tianQinCount = stars.filter(star => star === "天禽" || star === "芮禽").length;
+  if (tianQinCount > 1) {
+    issues.push("天禽星/芮禽出现多次");
+  }
+  
+  // 收集详细信息
+  details.dunJu = `${type}遁${juNum}局 (${yuan})`;
+  details.zhiFu = chart.zhiFu;
+  details.zhiShi = chart.zhiShi;
+  details.xunShou = chart.xunShou;
+  details.emptyBranches = chart.personalInfo?.emptyBranches || [];
+  details.maBranches = chart.personalInfo?.maBranches || [];
+  
+  // 九星分布
+  const starDistribution: Record<number, string> = {};
+  chart.palaces.forEach(palace => {
+    starDistribution[palace.id] = palace.elements.star;
+  });
+  details.starDistribution = starDistribution;
+  
+  // 八门分布
+  const gateDistribution: Record<number, string> = {};
+  chart.palaces.forEach(palace => {
+    gateDistribution[palace.id] = palace.elements.gate;
+  });
+  details.gateDistribution = gateDistribution;
+  
+  // 八神分布
+  const godDistribution: Record<number, string> = {};
+  chart.palaces.forEach(palace => {
+    godDistribution[palace.id] = palace.elements.god;
+  });
+  details.godDistribution = godDistribution;
+  
+  return {
+    isValid: issues.length === 0,
+    issues,
+    warnings,
+    details
+  };
+}
+
+/**
+ * 运行排盘测试
+ */
+export function runChartTest(): void {
+  console.log('=== 运行排盘测试 ===');
+  
+  // 测试案例1: 2026-01-15 16:30 (对应您提供的排盘结果)
+  const testDate1 = new Date('2026-01-15T16:30:00+08:00');
+  const birthDate1 = new Date('1979-07-11T16:30:00+08:00');
+  
+  console.log('测试案例1:');
+  console.log('事件时间:', testDate1.toLocaleString('zh-CN'));
+  console.log('出生时间:', birthDate1.toLocaleString('zh-CN'));
+  
+  const chart1 = plotChart(testDate1, '黄诗莹', '男', birthDate1);
+  
+  // 验证结果
+  const verification1 = verifyChartResult(chart1);
+  console.log('验证结果:');
+  console.log('  有效:', verification1.isValid);
+  if (verification1.issues.length > 0) {
+    console.log('  问题:');
+    verification1.issues.forEach(issue => console.log('    -', issue));
+  }
+  if (verification1.warnings.length > 0) {
+    console.log('  警告:');
+    verification1.warnings.forEach(warning => console.log('    -', warning));
+  }
+  
+  console.log('排盘摘要:');
+  console.log('  遁局:', verification1.details.dunJu);
+  console.log('  值符:', verification1.details.zhiFu);
+  console.log('  值使:', verification1.details.zhiShi);
+  console.log('  旬首:', verification1.details.xunShou);
+  
+  console.log('\n九星分布:');
+  Object.entries(verification1.details.starDistribution).forEach(([palace, star]) => {
+    console.log(`  宫位 ${palace}: ${star}`);
+  });
+  
+  console.log('\n空亡地支:', verification1.details.emptyBranches.join(', '));
+  console.log('驿马地支:', verification1.details.maBranches.join(', '));
+  
+  // 测试案例2: 当前时间
+  console.log('\n\n测试案例2: 当前时间');
+  const testDate2 = new Date();
+  const chart2 = plotChart(testDate2, '测试用户', '女', new Date('1990-01-01T12:00:00+08:00'));
+  
+  const verification2 = verifyChartResult(chart2);
+  console.log('验证结果:', verification2.isValid ? '有效' : '无效');
+  
+  console.log('\n=== 排盘测试完成 ===');
 }
 
 /**
@@ -933,6 +2124,32 @@ export function getDynamicPillarDetails(analysis: BaziAnalysis) {
       totalScore: stemScore + hiddenStemDetails.reduce((sum, item) => sum + item.adjustedScore, 0)
     };
   });
+}
+
+export function testYangDun2(): ChartResult {
+  const testDate = new Date('2026-02-15T23:49:00+08:00');
+  const birthDate = new Date('1979-07-11T09:30:00+08:00');
+  
+  console.log('=== 测试阳遁二局 ===');
+  console.log('事件时间:', testDate.toLocaleString('zh-CN'));
+  console.log('出生时间:', birthDate.toLocaleString('zh-CN'));
+  
+  const result = plotChart(testDate, '测试用户', '男', birthDate);
+  
+  // 验证地盘 - 更新为考虑了寄宫的预期
+  console.log('验证地盘:');
+  const expectedDiPan = {
+    1: '乙', 2: '辛', 3: '己', 4: '庚',
+    5: '', 6: '壬', 7: '癸', 8: '丁', 9: '丙'
+  };
+  
+  for (let i = 1; i <= 9; i++) {
+    const actual = result.debugInfo?.diPan?.[i] || '';
+    const expected = expectedDiPan[i as keyof typeof expectedDiPan];
+    console.log(`宫位 ${i}: 预期=${expected}, 实际=${actual}, ${actual === expected ? '✓' : '✗'}`);
+  }
+  
+  return result;
 }
 
 /**

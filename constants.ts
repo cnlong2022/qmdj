@@ -39,6 +39,25 @@ export const ELEMENT_RELATIONS: Record<string, { sheng: string, ke: string, wasS
   '水': { sheng: '木', ke: '火', wasSheng: '金', wasKe: '土' }
 };
 
+// 地支冲合关系
+export const BRANCH_CLASHES: Record<string, string> = {
+  '子': '午', '午': '子',
+  '丑': '未', '未': '丑',
+  '寅': '申', '申': '寅',
+  '卯': '酉', '酉': '卯',
+  '辰': '戌', '戌': '辰',
+  '巳': '亥', '亥': '巳'
+};
+
+export const BRANCH_COMBINATIONS: Record<string, string> = {
+  '子': '丑', '丑': '子',
+  '寅': '亥', '亥': '寅',
+  '卯': '戌', '戌': '卯',
+  '辰': '酉', '酉': '辰',
+  '巳': '申', '申': '巳',
+  '午': '未', '未': '午'
+};
+
 export const STEMS = ['甲', '乙', '丙', '丁', '戊', '己', '庚', '辛', '壬', '癸'];
 export const BRANCHES = ['子', '丑', '寅', '卯', '辰', '巳', '午', '未', '申', '酉', '戌', '亥'];
 
@@ -90,29 +109,35 @@ export const SOLAR_TERMS = [
 
 // Simplified mapping for Solar Term to Dun Ju (遁局)
 // In a real pro app, this would use the precise Chai Bu logic.
-export const TERM_DUN_MAP: Record<string, { type: '阳' | '阴', ju: number[] }> = {
-  "冬至": { type: '阳', ju: [1, 7, 4] },
-  "小寒": { type: '阳', ju: [2, 8, 5] },
-  "大寒": { type: '阳', ju: [3, 9, 6] },
-  "立春": { type: '阳', ju: [8, 5, 2] },
-  "雨水": { type: '阳', ju: [9, 6, 3] },
-  "惊蛰": { type: '阳', ju: [1, 7, 4] },
-  "春分": { type: '阳', ju: [3, 9, 6] },
-  "清明": { type: '阳', ju: [4, 1, 7] },
-  "谷雨": { type: '阳', ju: [5, 2, 8] },
-  "立夏": { type: '阳', ju: [4, 1, 7] },
-  "小满": { type: '阳', ju: [5, 2, 8] },
-  "芒种": { type: '阳', ju: [6, 3, 9] },
-  "夏至": { type: '阴', ju: [9, 3, 6] },
-  "小暑": { type: '阴', ju: [8, 2, 5] },
-  "大暑": { type: '阴', ju: [7, 1, 4] },
-  "立秋": { type: '阴', ju: [2, 5, 8] },
-  "处暑": { type: '阴', ju: [1, 4, 7] },
-  "白露": { type: '阴', ju: [9, 3, 6] },
-  "秋分": { type: '阴', ju: [7, 1, 4] },
-  "寒露": { type: '阴', ju: [6, 9, 3] },
-  "霜降": { type: '阴', ju: [5, 8, 2] },
-  "立冬": { type: '阴', ju: [6, 9, 3] },
-  "小雪": { type: '阴', ju: [5, 8, 2] },
-  "大雪": { type: '阴', ju: [4, 7, 1] },
+export const TERM_DUN_MAP: Record<string, { type: '阳' | '阴', yuan: number[] }> = {
+  // 阳遁节气
+  "冬至": { type: '阳', yuan: [1, 7, 4] },
+  "小寒": { type: '阳', yuan: [2, 8, 5] },
+  "大寒": { type: '阳', yuan: [3, 9, 6] },
+  "立春": { type: '阳', yuan: [8, 5, 2] },
+  "雨水": { type: '阳', yuan: [9, 6, 3] },
+  "惊蛰": { type: '阳', yuan: [1, 7, 4] },
+  "春分": { type: '阳', yuan: [3, 9, 6] },
+  "清明": { type: '阳', yuan: [4, 1, 7] },
+  "谷雨": { type: '阳', yuan: [5, 2, 8] },
+  "立夏": { type: '阳', yuan: [4, 1, 7] },
+  "小满": { type: '阳', yuan: [5, 2, 8] },
+  "芒种": { type: '阳', yuan: [6, 3, 9] },
+  
+  // 阴遁节气
+  "夏至": { type: '阴', yuan: [9, 3, 6] },
+  "小暑": { type: '阴', yuan: [8, 2, 5] },
+  "大暑": { type: '阴', yuan: [7, 1, 4] },
+  "立秋": { type: '阴', yuan: [2, 5, 8] },
+  "处暑": { type: '阴', yuan: [1, 4, 7] },
+  "白露": { type: '阴', yuan: [9, 3, 6] },
+  "秋分": { type: '阴', yuan: [7, 1, 4] },
+  "寒露": { type: '阴', yuan: [6, 9, 3] },
+  "霜降": { type: '阴', yuan: [5, 8, 2] },
+  "立冬": { type: '阴', yuan: [6, 9, 3] },
+  "小雪": { type: '阴', yuan: [5, 8, 2] },
+  "大雪": { type: '阴', yuan: [4, 7, 1] },
+  
+  // 默认值
+  "未知": { type: '阳', yuan: [1, 7, 4] }
 };

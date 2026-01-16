@@ -1,6 +1,8 @@
+
 import { analyzeBaziCore, determineDayMasterStrength, determineBaziPattern, generatePatternAdvice } from './analysisService';
 import { STEM_ELEMENTS, ELEMENT_RELATIONS, STEM_POLARITY, BRANCH_ELEMENTS } from '../constants';
 import { BaziAnalysis, PillarDetail, BaziCoreResult } from '../types';
+import { calculateYunNian } from './yunNianService';
 
 // 删除重复的函数，直接导出中心化服务
 export { 
@@ -52,10 +54,23 @@ export function calculateElementEnergyFromPillars(pillars: PillarDetail[]): Reco
 /**
  * 完整的八字分析接口（带建议）
  */
-export function analyzeBaziWithAdvice(pillars: PillarDetail[], dayMaster: string): BaziCoreResult & { advice: string[] } {
+export function analyzeBaziWithAdvice(
+  pillars: PillarDetail[], 
+  dayMaster: string,
+  birthDate: Date,
+  gender: '男' | '女',
+  currentDate: Date = new Date() // Add currentDate parameter
+): BaziCoreResult {
   const dayMasterElement = STEM_ELEMENTS[dayMaster];
   
-  // 这里简化处理，实际应用中应该调用完整的分析流程
+  // 构建支干柱子对象用于大运计算
+  const sbPillars = {
+    year: pillars[0].sb,
+    month: pillars[1].sb,
+    day: pillars[2].sb,
+    hour: pillars[3].sb
+  };
+
   const tempAnalysis: Partial<BaziAnalysis> = {
     dayMaster,
     dayMasterElement,
@@ -69,7 +84,8 @@ export function analyzeBaziWithAdvice(pillars: PillarDetail[], dayMaster: string
     yongShen: [],
     xiShen: [],
     jiShen: [],
-    strength: '中和'
+    strength: '中和',
+    yunNian: calculateYunNian(birthDate, currentDate, gender, sbPillars) // Fixed call signature
   } as any;
   
   const fullAnalysis: BaziAnalysis = {

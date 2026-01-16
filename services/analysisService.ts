@@ -1,4 +1,5 @@
-import { BaziAnalysis, BaziCoreResult } from '../types';
+
+import { BaziAnalysis, BaziCoreResult, ElementEnergyPercent } from '../types';
 import { STEM_ELEMENTS, ELEMENT_RELATIONS, ELEMENT_TO_KEY, KEY_TO_CHINESE } from '../constants';
 
 /**
@@ -73,8 +74,8 @@ export function determineBaziPattern(analysis: BaziAnalysis): string {
     let maxOtherElement = '';
     
     otherElements.forEach(element => {
-      const key = ELEMENT_TO_KEY[element];
-      const energy = analysis.elementEnergy[key] || 0;
+      const key = ELEMENT_TO_KEY[element] as keyof ElementEnergyPercent;
+      const energy = Number(analysis.elementEnergy[key] || 0); // Explicitly cast to number
       if (energy > maxOtherEnergy) {
         maxOtherEnergy = energy;
         maxOtherElement = element;
@@ -99,7 +100,7 @@ export function determineBaziPattern(analysis: BaziAnalysis): string {
   const strongElements: string[] = [];
   [['木', woodEnergy], ['火', fireEnergy], ['土', earthEnergy], ['金', metalEnergy], ['水', waterEnergy]]
     .forEach(([element, energy]) => {
-      if (energy > 30) {
+      if (Number(energy) > 30) {
         strongElements.push(element as string);
       }
     });
@@ -301,8 +302,8 @@ export function determineBaziPattern(analysis: BaziAnalysis): string {
   // 9. 流通格局
   // 检查五行能量是否相对均衡（没有明显偏枯）
   const energies = [woodEnergy, fireEnergy, earthEnergy, metalEnergy, waterEnergy];
-  const maxEnergy = Math.max(...energies);
-  const minEnergy = Math.min(...energies);
+  const maxEnergy = Math.max(...energies.map(e => Number(e)));
+  const minEnergy = Math.min(...energies.map(e => Number(e)));
   const energyDiff = maxEnergy - minEnergy;
   
   // 如果能量相对均衡（最大最小差小于40%）
@@ -314,8 +315,8 @@ export function determineBaziPattern(analysis: BaziAnalysis): string {
     for (let i = 0; i < elementOrder.length - 1; i++) {
       const currentEl = elementOrder[i];
       const nextEl = elementOrder[i + 1];
-      const currentEnergy = analysis.elementEnergy[ELEMENT_TO_KEY[currentEl]];
-      const nextEnergy = analysis.elementEnergy[ELEMENT_TO_KEY[nextEl]];
+      const currentEnergy = Number(analysis.elementEnergy[ELEMENT_TO_KEY[currentEl]] || 0);
+      const nextEnergy = Number(analysis.elementEnergy[ELEMENT_TO_KEY[nextEl]] || 0);
       
       // 如果当前五行有能量，下一五行也应该有一定能量
       if (currentEnergy > 15 && nextEnergy < 10) {
@@ -528,7 +529,7 @@ export function generatePatternAdvice(
   
   // 特殊旺衰格局系列
   else if (pattern === '身旺无依格') {
-    advices.push(`身强但财官弱，形成"身旺无依格"，有能力但缺乏施展平台。`);
+    advices.push(`身强 but 财官弱，形成"身旺无依格"，有能力但缺乏施展平台。`);
     advices.push(`此格局需等待时机，或寻找能发挥能力的平台。`);
     advices.push(`事业发展宜寻找合作机会，忌单打独斗。`);
   } else if (pattern === '身弱无扶格') {
@@ -1171,7 +1172,7 @@ export function analyzeBaziCore(analysis: BaziAnalysis): BaziCoreResult {
     yongShen: safeAnalysis.yongShen,
     xiShen: safeAnalysis.xiShen,
     jiShen: safeAnalysis.jiShen,
-    elementEnergy: safeAnalysis.elementEnergy,
+    elementEnergy: safeAnalysis.elementEnergy as any,
     advice
   };
 }
